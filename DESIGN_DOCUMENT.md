@@ -4,6 +4,8 @@ This document describes the design of a prototypical AI-driven security system.
 
 ## Components and Agents
 
+This system uses a langgraph-based workflow. The Situation Interpreter (SI) is the LangGraph graph, with one instance (and one checkpointed thread) per situation. The system further consists of one controller, which is plain deterministic code, and multiple agents that operate only upon request. The agents communicate via a pre-defined signal schema defined as Pydantic models. A response of an agent that does not validate against its schema is treated like a response that did not arrive (see the timeout handling below).
+
 The system consists of the following components:
 
 ### CCTV/Audio Processor and Filter
@@ -34,33 +36,35 @@ The person identificator is identifying a person in a given image or video.
 * {identify_person image="[image]"} - The person identificator should identify the person in the given image.
 
 **Outgoing Signals:**
-* {person_identified person="[person_data]"} - The person identificator has identified a person in the given video/image.
-* {person_not_known} - The person identificator could not detect a person in the given video/image, but it did not match any known person.
-* {unidentifyable cause=[cause]} - The person identificator could not identify a person in the given video/image (e.g. because of a hood, umbrella, or similar obstructions). Cause may be "clothing", "object on person", "external object", "unknown".
+* {person_identified person="[person_data]" confidence=[c]} - The person identificator has identified a person in the given video/image. The confidence $c \in [0,1]$ expresses how certain the match is. A match below a pre-configured confidence threshold is treated as *not decidable*.
+* {person_not_known} - The person identificator detected a person in the given video/image, but it did not match any known person (*unknown*).
+* {unidentifyable cause=[cause]} - The person identificator could not identify a person in the given video/image (e.g. because of a hood, umbrella, or similar obstructions). Cause may be "clothing", "object on person", "external object", "unknown". This is treated as *not decidable*.
 
 
-### An object detector
+### Object detector (Agent)
 
-This agent is responsible for detecting and classifying objects in the video. It should be able to detect multiple objects at once and their possible relations (A man leaving a car, a woman carrying a crowbar, etc). For people, it should also be able to determine the role (e.g. job) of a person.
+This agent is responsible for detecting and classifying objects in the video. It should be able to detect multiple objects at once and their possible relations (A man leaving a car, a woman carrying a crowbar, etc). For people, it should also be able to determine the role (e.g. job) of a person. It may also classify an anomaly as a *sensor artefact* (e.g. lens flare, compression glitch, insects on the lens) if it does not show any object.
 
-### Knowledge Base
+### Knowledge Base (Graph Database)
 
 A (graph-based) knowledge base should be used to store relevant information:
 
-1. People that the system may recognize, storing name. Each person is represented by one or more images (e.g. uploaded photos or captured by the CCTV cameras). Each person should also be annotated with a familiarity and suspicion score as well as their respective roles (family members, roles according to the [ESCO](https://ec.europa.eu/esco/lod/static/model.html).
+1. People that the system may recognize, storing name. Each person is represented by one or more images (e.g. uploaded photos or captured by the CCTV cameras). Each person should also be annotated with a familiarity and suspicion score as well as their respective roles (family members, jobs, etc.).
 2. A record of all areas of the surveiled area as well of their interconnections.
-3. Permission records tracking permission rules for areas (whitelist). These rules should have the shape of simple Prolog-like rules. Natural language examples:
+3. Permission records tracking permission rules for areas (whitelist). These rules should have the shape of simple rules. Natural language examples:
   * Family members are allowed to enter all areas.
-  * [Messengers](https://ec.europa.eu/esco/lod/static/model.html#Messenger) may enter the entryway, no other areas. A dedicated drop-off point may be configured. In that case, one or more paths from the entrance to the drop-off point are allowed.
+  * Delivery people may enter the entryway, but no other areas. However, a dedicated drop-off point may be configured. In that case, one or more paths from the entrance to the drop-off point are allowed.
   * People that are not familiar and have not been invited in/accompanied by a family member in the immediate past are allowed to enter the entryway for a limited amount of time (e.g. to ring the bell) but no other areas.
 4. A record of all sensors and their spacial position and orientation
 5. A record of all people currently in the surveiled area.
 
 **Note:** The storage and processing of personal data and image data in particular has legal implications under the GDPR, in particular, if the camera's field of view includes public areas. I will not implement this aspect as it seems outside the scope for this challenge, this limitation should be noted and considered in the design of such a system.
 
-### Noise interpreter
+### Noise interpreter (Agent)
 
-### Behavioural interpreter
+This agent takes audio data and classifies it as human activity, animal, weather (e.g. wind, rain), technical noise (e.g. a sensor artefact or an electrical hum) or unknown.
+
+### Behavioural interpreter (Agent)
 
 The behavioural interpreter is an agend that analyses a sequence of frames showing one or more people and tries to predict their intentions and interrelations. It should be able to predict the following intents: 
 * Delivery
@@ -73,11 +77,11 @@ The behavioural interpreter is an agend that analyses a sequence of frames showi
 * Unknown activity
 * Suspicious activity
 
-### Weather Forecast Fetch
+### Weather Forecast Fetch (Agent)
 
-This agent fetches the local weather forecast from a pre-configured weather forecast service.
+This agent fetches the local weather forecast from a pre-configured weather forecast service. To limit the traffic to outside systems, this agent requests an update at most once an hour and otherwise returns cached data.
 
-### Weather interpreter
+### Weather interpreter (Agent)
 
 This agent takes video and audio data and analyzes the weather conditions and annotates them with the following information:
 * High wind (with approximate wind speed)
@@ -88,46 +92,56 @@ This agent takes video and audio data and analyzes the weather conditions and an
 * Sunny
 * Unknown weather conditions
 
-### Speaker
+### Speaker (Hardware)
 
 Speakers are placed throughout the surveiled area.
 
 **Incoming Signals:**
     {speak text="[text]"} - The speaker should speak the given text.
 
-### Situation Interpreter
+### Controller (Agent)
 
-This agent is a central controller. It operates in multiple modes:
+This agent is a central controller. The controller mereley has an executive function. It follows the described workflow and may only use LLM components, when indicated. It catches the {event} signals of all sensors and initializes a new Situation Interpreter and passes the signal to it. It receives the {situation_summary} signal from possibly multiple Situation Interpreters and amalgamates them into a single situation summary. It logs the individual situation summaries and the aggregated situation summary as well as the corresponding data.  Whenever the controller triggers a warning or an alarm, the situation and all relevant data is stored in the event log.
 
-* Idle: The controller does nothing. The {event} signal from a sensor transitions this system into the Observe state.
-* Observe: Upon receiving an {event} signal, the situation interpreter (SI) analyzes the data attached video and hands it to the object detector. For each relevant object, it determines the spacial position (Todo: How) and queries the rele The following behaviour depends on the outcome of the object detector:
+An {alarm} signal is triggered if the aggregated situation summary indicates a high suspicion level. Alarms are only ever triggered by the controller through the deterministic rules described here (or by a user elevating a warning); no agent output, in particular no free text, can trigger an alarm directly.
 
-1. If one or more people are detected. The SI queries the person identificator for the person's data.
+The controller collates all information from all active Situation interpreters, calculates a combined suspicion sore for each detected person. If a person exceeds a pre-configured warning threshold of suspicion, the controller triggers a {warning cause="Suspicious person"} signal. If a person exceeds another threshold of suspicion, the controller triggers an {alarm cause="strong suspicion"} signal. The Controller also compares the area in which a person is detected with the areas in which the person is allowed to enter. If the person is not allowed to enter the area in question, the controller triggers a {warning cause="Unpermitted entry"} signal to the log and a {speak text="your are entering without permission. Please leave the area immediately."} signal is sent. If the entry is prolonged, it will issue an {alarm cause="Unpermitted entry"} signal. Every warning carries the suspicion level of the situation summary it originates from.
 
-If a detected person is known to the system, the SI annotates the bounding boxes of each detected person with the person's name and the person's familiarity, suspicion score and role. The SI then also compares the person's predicted role with the ones in the knowledge base. A notable difference between the annotated roles and predicted ones is considered *suspicious*, wherein the difference in roles influences the intensity of that suspicion.
+Finally, the controller stores the data of all detected people in the knowledge base, alongside their roles and suspicion scores, unless the person was marked as unidentifiable.
 
-The SI then passes the image and video data to the behavioural interpreter. The behavioural interpreter then analyses the data and predicts the person's intentions and interrelations. It compares the predicted intentions with the predicted roles. A mismatch between the predicted intentions and predicted roles is considered *suspicious*, wherein the degree of mismatch ($d \in [0,1]$) between both characteristics influence the intensity of that suspicion.
-
-The SI also compares the area in which a person is detected with the areas in which the person is allowed to enter. If the person is not allowed to enter the area in question, the SI triggers a {warning cause="Unpermitted entry"} signal to the log and a {speak your are entering without permission. Please leave the area immediately."}. If the entry is prolonged, it will issue a {alarm cause="Unpermitted entry"} signal.
-
-If a person exceeds a pre-configured warning threshold of suspicion, the SI triggers a {warning cause="Suspicious person"} signal. If a person exceeds another threshold of suspicion, the SI triggers a {alarm cause="strong suspicion"} signal.
-
-Finally, the SI stores the data of all detected people in the knowledge base, alongside their roles and suspicion scores, unless the person was marked as unidentifiable. Suspicion scores deteriorate over time with a configurable decay rate.
-
-2. If an animal is detected, the SI evaluates the potential danger an animal poses. If a dangerous animal (e.g. a bear) is detected, and an alarm should be triggered under each of the following conditions:
+If a high-danger animal (e.g. a bear) is detected by some SI, an {alarm [cause]="dangerous animal"} should be triggered under any of the following conditions:
   * There is an open entry point to the house.
   * (Optional; default: False) One or more people are within the surveiled area.
   * (Optional; default: False) The event occurs within a specific time frame.
 
-The SI also passes the image and video data to the weather interpreter and queries the weather forcast fetcher. Both results are then compared. If a weather event has been detected, the SI queries the weather forecast fetcher for the weather forecast and compares the results.
+If none of these three conditions is met, a {warning [cause]="dangerous animal"} is sent instead. If an SI sends the {obscured} signal, the controller queries the weather forecast fetcher for the weather forecast. The results are then evaluated to determine whether the obstruction is plausible (e.g. by heavy fog, snow, rain or an eclipse). It also passes the video data to the behavioural interpreter to check whether the obstruction is plausably caused by human activity of an person flagged as *unsuspicious* or within the scope of their role (e.g. the gardener blocking the view of a camera while trimming the hedges). If the obstruction is not plausible and the obstruction is prolonged, the controller triggers a {warning cause="vision obstructed"} signal. The controller then also queries the respective audio recorder for the audio data and passes the results to the noise interpreter. If the interpretation indicates human activity and no family member is in the area in question, the controller triggers an {alarm cause="obstruction by human activity"} signal.
 
-If the vision of the CCTV systems is obscured, the SI queries the weather forecast fetcher for the weather forecast. The results are then evaluated to determine whether the obstruction is plausible (e.g. by heavy fog, snow, rain or an eclipse). 
-It also passes the video data to the behavioural interpreter to check whether the obstruction is plausably caused by human activity of an person flagged as *unsuspicious* or within the scope of their role (e.g. the gardener blocking the view of a camera while trimming the hedges).
-If the obstruction is not plausible and the obstruction is prolonged, the SI triggers an {warning cause="vision obstructed"} signal. The SI then also queries the respective audio recorder for the audio data and passes the results to the noise interpreter. If the interpretation indicates human activity and no family member is in the area in question, the SI triggers an {alarm cause="obstruction by human activity"} signal.
+Each situation and each event is given a unique ID. Alarms, warnings and speaker signals are idempotent: each of them is identified by an idempotency key derived from the situation ID and its cause (e.g. `[situation_id]:[cause]`). Before sending one, the controller checks in a persistent store whether the key has already been used and, if so, does nothing and returns the earlier result. Otherwise, it sends the signal and stores the key. This ensures that retries, a resume from a checkpoint or several SIs reaching the same conclusion do not trigger the same signal twice. Additionally, the system checks, whether a sufficiently similar alarm (same cause, same area) has already been triggered in the immediate past, in order to avoid flooding for distinct situations.
 
-Whenever the SI triggers a warning or an alarm, the situation and all relevant data is stored in the event log.
+### Situation Interpreter (Agent)
 
-### Communication Unit
+The situation interpreter is controlled by an internal state machine. By default, it is in an `Idle` state, that is only interrupted by an {event} signal from the Controller. It then switches to the `Interpret` analyses the incoming signals. Any subsequent {event} triggers regarding the same region are deferred. During the interpretation, the agend performs the following actions:
 
-Upon receiving a {warning cause="[cause]"} the communication sends a text notification to all registered primary contacts and also to all contacts within the surveiled area. These users then have the option to elevate the warning to an alarm, by clicking a button in the linked app, which sends an {elevate warning_id=[warning_id]}.
+The SI passes the information the object detection agent and fans out in parallel to several agents depending on the kind of detected object/event:
 
+* If one or more people are detected. 
+  1. The SI queries the `person identificator` for the person's data. If a detected person is known to the system, the SI annotates the bounding boxes of each detected person with the person's name and the person's familiarity, suspicion score and role. The SI then also compares the person's predicted role with the ones in the knowledge base. A notable difference between the annotated roles and predicted ones is considered *suspicious*, wherein the difference in roles influences the intensity of that suspicion. If the `person identifier` is not available, does not respond within a given time frame or returns an invalid response, the SI annotates the person as *not decidable* (cause "unavailable"). A *not decidable* person is not considered *suspicious* by itself, but is treated like a person that is not familiar in the permission checks.
+  2. The SI then passes the image and video data to the `behavioural interpreter`. The behavioural interpreter then analyses the data and predicts the person's intentions and interrelations. It compares the predicted intentions with the predicted roles. A mismatch between the predicted intentions and predicted roles is considered *suspicious*, wherein the degree of mismatch ($d \in [0,1]$) between both characteristics influence the intensity of that suspicion. The behavioural interpreter may also detect possible health emergencies, which are also annotated. If the behavioural interpreter is not available, does not respond within a given time frame or returns an invalid response, the SI annotates the behaviour as *unknown*.
+
+* If an animal is detected, the SI annotates the potential dangerousness with a pre-defined danger score depending on its kind (1 for a bear, 0.8 for a boar, 0.6 for an unknown large dog, 0.4 for an unknown small dog, etc.). If the animal is not known to the system, it is annotated as *unknown*, which is by default not considered *dangerous*.
+
+* If a weather event has been detected, the SI queries the weather forecast fetcher for the weather forecast and compares the results. If there is a significant mismatch between these results, the situation is considered suspicious and the weather event anntotated accordingly. If either the weather forecast fetcher or the weather interpreter is not available, does not respond within a given time frame or returns an invalid response, the SI annotates the weather event as *unknown*, which is by default not considered *suspicious*.
+
+* If the anomaly was classified as a *sensor artefact* (by the object detector or, for audio, the noise interpreter), the SI annotates it accordingly. It has a threat score of 0 and is only logged.
+
+* If the vision of the CCTV systems is obscured, the SI returns an {obscured} signal. 
+
+The SI merges the respective responses and compiles them into a `situation summary`. It sends a {situation_summary} signal to the controller, which contains a summary of the situation and a separate threat assessment assigned with a score $[0,1]$. The score is the minimum of the scores of the individual objects/events. The SI then moves to the `Observe` state, in which it reevaluates the situation at fixed intervalls and on subsequent {event} signals by re-entering the `Interpret` state. Once the re-evaluation determines that the situation is resolved, it sends a {situation_resolved} signal to the controller and moves to the `Idle` state.
+
+The state of each situation is checkpointed by the workflow after each step, keyed by the situation ID (the thread ID). After a crash or restart, the SI resumes from the last checkpoint with the same situation ID. Steps that are repeated after a resume only re-run analyses; side effects are protected by the idempotency keys described above.
+
+### Communication Unit (Agent)
+
+Upon receiving a {warning cause="[cause]"} the communication sends a text notification to all registered primary contacts and also to all contacts within the surveiled area. A warning with a suspicion level from over 0.75 is displayed as an orange warning and those below as a yellow warning. During the night, this threshold is lowered to 0.5, as users are less likely to respond at night and unanswered orange warnings are elevated. A user then have the option to elevate the warning to an alarm, by clicking a button in the linked app, which sends an {elevate warning_id=[warning_id]} signal. While waiting for the answer, the situation is paused (an interrupt of the workflow) and resumed under the same situation ID once an answer or the timeout arrives. If a warning is not answered within a pre-defined time frame either by an dismiss or an elevate, the system falls back and dismisses yellow warnings and elevates orange warnings automatically.
+
+Each kind of alarm and warning has a pre-defined template for outside communication, which is completed with information from the annotated data in the signal. No messages for outside communication are autogenerated.
