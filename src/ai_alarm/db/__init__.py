@@ -24,3 +24,11 @@ def make_engine(url: str = DEFAULT_URL) -> Engine:
     return engine
 
 
+def init_db(engine: Engine) -> None:
+    """Create the database file (and its directory) and all missing tables. Existing tables are left as they are."""
+    path = engine.url.database
+    if path and path != ":memory:":
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Base.metadata.create_all(engine)
+
+
