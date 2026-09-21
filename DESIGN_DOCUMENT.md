@@ -1,6 +1,6 @@
 # Design
 
-This document describes the design of a prototypical AI-driven security system. It is based on the Flask framework and uses the LangGraph library for the workflow and a sqlite database for the persistent storage (This is for the challenge only, in production, a more robust database should be used). The concrete signal schemas, HTTP endpoints, data model and configuration are specified in `API.md`; this document describes the behaviour.
+This document describes the design of a prototypical AI-driven security system. It is based on the Flask framework and uses the LangGraph library for the workflow and a sqlite database for the persistent storage (This is for the challenge only, in production, a more robust database should be used).
 
 ## Workflow
 
@@ -10,7 +10,7 @@ This system uses a langgraph-based workflow. The Situation Interpreter (SI) is t
 
 Every component in this document is one of the following types, which is stated in its heading:
 
-* **Agent** - a stateless, model-based (AI) component. It operates only upon request, answers with a structured response, and never calls another component. Model backends are configurable; for the challenge each agent may be replaced by a mock (see `API.md`).
+* **Agent** - a stateless, model-based (AI) component. It operates only upon request, answers with a structured response, and never calls another component. Model backends are configurable; for the challenge each agent may be replaced by a mock.
 * **Service** - a deterministic component without a model that offers data or functionality upon request (e.g. the weather forecast fetcher, the knowledge base).
 * **Deterministic component** - plain code that executes fixed rules (the controller, the communication unit).
 * **Workflow** - the LangGraph-based Situation Interpreter.
@@ -215,3 +215,9 @@ Each kind of alarm and warning has a pre-defined template for outside communicat
 ## Interface
 
 The system provides a web interface for users to interact with the alarm system. Users can access the current output of all sensors, the log of all past events, and all past situations as well as their summary and related data. Visual data should be combined with the annotations and shown next to the corresponding bounding boxes.
+
+## Scope
+
+These aspects are not within scope for this challenge:
+* Any authentication aspects
+* Any creation, editing or deletion of people, roles, areaa, permission rules,
