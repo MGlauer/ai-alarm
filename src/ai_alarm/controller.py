@@ -87,6 +87,7 @@ class SituationSummarySignal(SituationSignal):
     threat_score: Score  # the maximum of the scores of the individual objects/events
     persons: list[PersonAssessment] = []
     animals: list[AnimalAssessment] = []
+    weather_suspicion: Score = 0.0  # of a weather event that does not match the forecast
     unclear_situation: bool = False
 
 
@@ -110,9 +111,6 @@ class SituationInterpreters(Protocol):
 
     def forward(self, situation_id: str, event: SituationEventSignal) -> None:
         """Give a further event to the running interpreter of the situation."""
-
-    def resume(self, situation_id: str) -> None:
-        """Continue a situation that waited for the answer to a warning. Does nothing if it is not waiting."""
 
 
 class Speaker(Protocol):
@@ -295,11 +293,13 @@ class Controller:
 
     # ------------------------------------------------------------------ rules for a summary
     def _check_suspicion(self, signal: SituationSummarySignal, combined: dict[str, float]) -> None:
-        top = max((combined[self._person_key(signal.situation_id, p)] for p in signal.persons), default=0.0)
-        if top > self.config.alarm_threshold:
-            self._alarm(signal.situation_id, signal.area_id, "strong suspicion", "rule")
-        elif top > self.config.warning_threshold:
-            self._warn(signal.situation_id, signal.area_id, "suspicious person", signal.threat_score)
+        """A person, or the weather, that exceeds the suspicion thresholds triggers a warning or an alarm."""
+        top_person = max((combined[self._person_key(signal.situation_id, p)] for p in signal.persons), default=0.0)
+        for suspicion, cause in ((top_person, "suspicious person"), (signal.weather_suspicion, "suspicious weather")):
+            if suspicion > self.config.alarm_threshold:
+                self._alarm(signal.situation_id, signal.area_id, "strong suspicion", "rule")
+            elif suspicion > self.config.warning_threshold:
+                self._warn(signal.situation_id, signal.area_id, cause, signal.threat_score)
 
     def _check_permissions(self, signal: SituationSummarySignal, stays: dict[str, float], now: datetime) -> None:
         sid, area_id = signal.situation_id, signal.area_id
@@ -386,10 +386,10 @@ class Controller:
     # ------------------------------------------------------------------ answers to warnings
     def elevate(self, warning_id: str) -> None:
         """The user elevates a warning to an alarm."""
-        self._resume(self._answer(warning_id, "elevated", "user"))
+        self._answer(warning_id, "elevated", "user")
 
     def dismiss(self, warning_id: str) -> None:
-        self._resume(self._answer(warning_id, "dismissed", "user"))
+        self._answer(warning_id, "dismissed", "user")
 
     def check_timeouts(self) -> None:
         """Apply the fallback policy to warnings that were not answered in time. Call this periodically."""
@@ -397,16 +397,16 @@ class Controller:
             due = list(s.scalars(select(SituationWarning.id).where(
                 SituationWarning.status == "open", SituationWarning.answer_deadline <= self.clock())))
         for warning_id in due:
-            self._resume(self._fallback(warning_id))
+            self._fallback(warning_id)
 
-    def _fallback(self, warning_id: str) -> str | None:
+    def _fallback(self, warning_id: str) -> None:
         """Yellow warnings are dismissed, orange ones elevated."""
         with self.session_factory() as s:
             colour = s.get(SituationWarning, warning_id).colour
-        return self._answer(warning_id, "elevated" if colour == "orange" else "dismissed", "fallback_policy")
+        self._answer(warning_id, "elevated" if colour == "orange" else "dismissed", "fallback_policy")
 
-    def _answer(self, warning_id: str, status: str, resolved_by: str) -> str | None:
-        """Returns the situation to resume if that was the last open warning it waited for."""
+    def _answer(self, warning_id: str, status: str, resolved_by: str) -> None:
+        """Answer an open warning. Answering a warning that is answered already changes nothing."""
         with self._lock:
             now = self.clock()
             with self.session_factory() as s:
@@ -414,7 +414,7 @@ class Controller:
                 if warning is None:
                     raise LookupError(f"unknown warning {warning_id}")
                 if warning.status != "open":  # answered already, e.g. by the timeout
-                    return None
+                    return
                 warning.status, warning.resolved_by, warning.resolved_at = status, resolved_by, now
                 s.add(LogEntry(created_at=now, situation_id=warning.situation_id, kind=f"warning_{status}",
                                message=f"{warning.cause}: {status} ({resolved_by})", data={"warning_id": warning.id}))
@@ -423,22 +423,6 @@ class Controller:
             if status == "elevated":
                 origin = "user_elevation" if resolved_by == "user" else "fallback_policy"
                 self._alarm(situation_id, area_id, cause, origin, warning_id)
-            return self._unpause(situation_id)
-
-    def _unpause(self, situation_id: str) -> str | None:
-        with self.session_factory() as s:
-            still_open = s.scalars(select(SituationWarning.id).where(
-                SituationWarning.situation_id == situation_id, SituationWarning.status == "open")).first()
-            situation = s.get(Situation, situation_id)
-            if still_open or situation.status != "waiting_for_user":
-                return None
-            situation.status = "active"
-            s.commit()
-            return situation_id
-
-    def _resume(self, situation_id: str | None) -> None:
-        if situation_id is not None:
-            self.interpreters.resume(situation_id)
 
     # ------------------------------------------------------------------ warnings, alarms, speaker (idempotent)
     def _warn(self, situation_id: str, area_id: str, cause: str, suspicion: float, speak: str | None = None) -> str:
@@ -464,12 +448,9 @@ class Controller:
             s.add(self._log_entry(s, now, situation_id, "warning", f"{cause} ({colour})", {
                 "warning_id": warning_id, "area_id": area_id, "cause": cause, "suspicion": suspicion,
                 "colour": colour, "delivered_to": [d.contact_id for d in deliveries if d.sent]}))
-            situation = s.get(Situation, situation_id)
-            if situation.status == "active":
-                situation.status = "waiting_for_user"  # paused until the warning is answered
             s.commit()
         if not any(d.sent for d in deliveries):  # nobody could be reached: the fallback policy applies right away
-            self._resume(self._fallback(warning_id))
+            self._fallback(warning_id)
         return warning_id
 
     def _alarm(self, situation_id: str, area_id: str, cause: str, origin: str, warning_id: str | None = None) -> str:

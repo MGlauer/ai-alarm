@@ -2,166 +2,18 @@
 everything outside (situation interpreters, speaker, transport, weather, audio, the model of two agents) faked."""
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, time, timezone
 
 import pytest
 from sqlalchemy import select
+from world import T0, known, person
 
-from ai_alarm.agents import BehaviouralInterpreter, NoiseInterpreter
 from ai_alarm.agents.behavioural_interpreter import PersonContext
-from ai_alarm.comm import CommunicationUnit
-from ai_alarm.controller import (
-    UNPERMITTED_ENTRY_TEXT, AnimalAssessment, Controller, ControllerConfig, ObscuredSignal, PersonAssessment,
-    SensorEventSignal, SituationResolvedSignal, SituationSummarySignal,
-)
+from ai_alarm.controller import UNPERMITTED_ENTRY_TEXT, AnimalAssessment, ControllerConfig
 from ai_alarm.db.models import (
     AggregatedSummary, EntryPoint, LogEntry, Notification, Person, PersonPresence, Scenario, SensorEvent,
-    Situation, SituationAlarm, SituationSummary, SituationWarning,
+    Situation, SituationSummary,
 )
-
-T0 = datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc)
-SENSORS = {"garden": "cam_garden", "entry": "cam_entry", "house": "cam_house"}
-
-
-# ------------------------------------------------------------------ fakes for everything outside the controller
-class Clock:
-    def __init__(self, now):
-        self.now = now
-
-    def __call__(self):
-        return self.now
-
-    def advance(self, seconds):
-        self.now += timedelta(seconds=seconds)
-
-
-class FakeInterpreters:
-    def __init__(self):
-        self.started, self.forwarded, self.resumed = [], [], []
-
-    def start(self, situation_id, event):
-        self.started.append((situation_id, event))
-
-    def forward(self, situation_id, event):
-        self.forwarded.append((situation_id, event))
-
-    def resume(self, situation_id):
-        self.resumed.append(situation_id)
-
-
-class FakeSpeaker:
-    def __init__(self):
-        self.spoken = []
-
-    def speak(self, text):
-        self.spoken.append(text)
-
-
-class FakeTransport:
-    def __init__(self):
-        self.sent, self.reachable = [], True
-
-    def send(self, phone, message):
-        if self.reachable:
-            self.sent.append((phone, message))
-        return self.reachable
-
-
-class FakeWeather:
-    def __init__(self):
-        self.conditions, self.fail = set(), False
-
-    def conditions_at(self, at):
-        if self.fail:
-            raise ConnectionError("weather service down")
-        return self.conditions
-
-
-class FakeAudio:
-    def __init__(self):
-        self.reference = "audio.wav"
-
-    def latest_audio(self, area_id, at):
-        return self.reference
-
-
-def person(identity="unknown", obj="p1", suspicion=0.1, **kw):
-    return PersonAssessment(object_id=obj, identity=identity, suspicion=suspicion, **kw)
-
-
-def known(person_id="anna", obj="p1", suspicion=0.0, **kw):
-    return person("known", obj, suspicion, person_id=person_id, **kw)
-
-
-class World:
-    def __init__(self, session_factory, kb, config, now):
-        self.sf, self.kb = session_factory, kb
-        self.clock = Clock(now)
-        self._events = 0
-        self.interpreters, self.speaker, self.transport = FakeInterpreters(), FakeSpeaker(), FakeTransport()
-        self.weather, self.audio = FakeWeather(), FakeAudio()
-        # what the models of the behavioural and the noise interpreter answer
-        self.behaviour = {"persons": [{"object_id": "p1", "role_mismatch": 0.0,
-                                       "intents": [{"intent": "move_to_area", "confidence": 0.9}]}],
-                          "relations": [], "health_emergency": False}
-        self.noise = {"category": "human_activity", "confidence": 0.9, "is_sensor_artefact": False}
-        self.controller = Controller(
-            session_factory=session_factory, kb=kb, comm=CommunicationUnit(kb, self.transport),
-            interpreters=self.interpreters, speaker=self.speaker, weather=self.weather, audio=self.audio,
-            behavioural_interpreter=BehaviouralInterpreter(lambda **kw: self.behaviour, kb),
-            noise_interpreter=NoiseInterpreter(lambda **kw: self.noise, kb),
-            config=config, clock=self.clock)
-
-    # ---- actions
-    def event(self, event_id, area="garden", sensor=None):
-        sensor = sensor or SENSORS[area]
-        return self.controller.handle_sensor_event(SensorEventSignal(
-            type="audio_event" if sensor.startswith("mic") else "video_event", event_id=event_id, sensor_id=sensor,
-            area_id=area, start_time=self.clock(), evidence=f"{event_id}.mp4"))
-
-    def situation(self, area="garden"):
-        """Send a new event for the area; returns its situation (the running one, or a new one)."""
-        self._events += 1
-        return self.event(f"auto_{self._events}", area)
-
-    def summary(self, sid, area="garden", score=0.1, persons=(), **kw):
-        self.controller.handle_situation_summary(SituationSummarySignal(
-            situation_id=sid, area_id=area, summary=kw.pop("text", "something"), threat_score=score,
-            persons=list(persons), **kw))
-
-    def obscured(self, sid, area="garden", persons=()):
-        self.controller.handle_obscured(ObscuredSignal(
-            situation_id=sid, area_id=area, evidence=["frame.png"], persons=list(persons)))
-
-    def resolve(self, sid):
-        self.controller.handle_situation_resolved(SituationResolvedSignal(situation_id=sid))
-
-    # ---- what is in the database
-    def rows(self, model, **where):
-        with self.sf() as s:
-            return list(s.scalars(select(model).filter_by(**where)))
-
-    def warnings(self, sid=None, **where):
-        return self.rows(SituationWarning, **({"situation_id": sid} if sid else {}), **where)
-
-    def alarms(self, sid=None, **where):
-        return self.rows(SituationAlarm, **({"situation_id": sid} if sid else {}), **where)
-
-    def log_kinds(self, sid):
-        return [e.kind for e in self.rows(LogEntry, situation_id=sid)]
-
-    def status(self, sid):
-        return self.rows(Situation, id=sid)[0].status
-
-
-@pytest.fixture
-def make_world(session_factory, kb):
-    return lambda config=ControllerConfig(), now=T0: World(session_factory, kb, config, now)
-
-
-@pytest.fixture
-def world(make_world):
-    return make_world()
 
 
 # ------------------------------------------------------------------ sensor events and situations
@@ -262,13 +114,12 @@ def test_free_text_never_triggers_anything(world):
     assert not world.warnings() and not world.alarms() and not world.transport.sent
 
 
-def test_suspicious_person_triggers_a_warning_that_pauses_the_situation(world):
+def test_suspicious_person_triggers_a_warning(world):
     sid = world.situation("entry")
     world.summary(sid, "entry", 0.5, [person(suspicion=0.5)])
     (warning,) = world.warnings(sid)
     assert (warning.cause, warning.colour, warning.suspicion, warning.status) == \
         ("suspicious person", "yellow", 0.5, "open")
-    assert world.status(sid) == "waiting_for_user"
 
     (phone, message), = world.transport.sent  # Bob is the only recipient: Anna is not in the area
     assert phone == "+49 100"
@@ -346,6 +197,34 @@ def test_several_situations_reaching_the_same_conclusion_trigger_it_once(world):
     for sid, area in [(entry, "entry"), (garden, "garden")]:
         world.summary(sid, area, 0.9, [person(suspicion=0.9)])
     assert [(a.cause, a.situation_id) for a in world.alarms()] == [("strong suspicion", entry)]
+
+
+def test_suspicious_weather_is_handled_like_a_suspicious_person(world):
+    sid = world.situation("garden")
+    world.summary(sid, "garden", 0.4, weather_suspicion=0.4)  # not above the warning threshold
+    assert not world.warnings() and not world.alarms()
+
+    world.summary(sid, "garden", 0.5, weather_suspicion=0.5)
+    (warning,) = world.warnings(sid)
+    assert (warning.cause, warning.colour, warning.suspicion) == ("suspicious weather", "yellow", 0.5)
+    assert world.transport.sent[0][1].startswith(
+        "YELLOW WARNING (0.50): The weather in Garden does not match the forecast.")
+
+    world.summary(sid, "garden", 0.5, weather_suspicion=0.5)  # idempotent
+    assert len(world.warnings()) == 1 and len(world.transport.sent) == 1 and not world.alarms()
+
+
+def test_strong_suspicion_of_the_weather_triggers_an_alarm(world):
+    sid = world.situation("garden")
+    world.summary(sid, "garden", 0.9, weather_suspicion=0.9)
+    assert [(a.cause, a.origin) for a in world.alarms(sid)] == [("strong suspicion", "rule")]
+    assert not world.warnings()
+
+
+def test_a_suspicious_person_and_suspicious_weather_are_two_causes(world):
+    sid = world.situation("entry")
+    world.summary(sid, "entry", 0.5, [person(suspicion=0.5)], weather_suspicion=0.5)
+    assert sorted(w.cause for w in world.warnings()) == ["suspicious person", "suspicious weather"]
 
 
 def test_unclear_situation_warns_at_the_warning_threshold(world):
@@ -486,24 +365,22 @@ def warned(world, score=0.5):
     return sid, world.warnings(sid)[0]
 
 
-def test_elevating_a_warning_triggers_an_alarm_and_resumes_the_situation(world):
+def test_elevating_a_warning_triggers_an_alarm(world):
     sid, warning = warned(world)
     world.controller.elevate(warning.id)
 
     (alarm,) = world.alarms(sid)
     assert (alarm.cause, alarm.origin, alarm.warning_id) == ("suspicious person", "user_elevation", warning.id)
     assert world.warnings(sid)[0].status == "elevated" and world.warnings(sid)[0].resolved_by == "user"
-    assert world.status(sid) == "active" and world.interpreters.resumed == [sid]
 
     world.controller.elevate(warning.id)  # answered already: nothing more happens
-    assert len(world.alarms()) == 1 and world.interpreters.resumed == [sid]
+    assert len(world.alarms()) == 1
 
 
-def test_dismissing_a_warning_resumes_the_situation_without_alarm(world):
+def test_dismissing_a_warning_triggers_no_alarm(world):
     sid, warning = warned(world)
     world.controller.dismiss(warning.id)
     assert world.warnings(sid)[0].status == "dismissed" and not world.alarms()
-    assert world.status(sid) == "active" and world.interpreters.resumed == [sid]
 
 
 def test_unknown_warning_is_a_caller_error(world):
@@ -511,14 +388,15 @@ def test_unknown_warning_is_a_caller_error(world):
         world.controller.elevate("wrn_nope")
 
 
-def test_situation_resumes_only_when_all_its_warnings_are_answered(world):
-    sid = world.situation("entry")
-    world.summary(sid, "entry", 0.5, [person(suspicion=0.5)], unclear_situation=True)
-    first, second = world.warnings(sid)
-    world.controller.dismiss(first.id)
-    assert world.status(sid) == "waiting_for_user" and not world.interpreters.resumed
-    world.controller.dismiss(second.id)
-    assert world.status(sid) == "active" and world.interpreters.resumed == [sid]
+def test_events_are_not_held_back_while_a_warning_waits_for_the_answer(world):
+    sid, warning = warned(world)
+    for _ in range(2):  # the same conclusion again: processed, but not triggered again
+        world.summary(sid, "entry", 0.5, [person(suspicion=0.5)])
+    assert len(world.warnings()) == 1 and len(world.transport.sent) == 1 and world.status(sid) == "active"
+    assert len(world.rows(SituationSummary)) == 3 and len(world.rows(AggregatedSummary)) == 3
+
+    world.summary(sid, "entry", 1.0, [person(suspicion=0.5)], animals=[AnimalAssessment(label="bear", danger=1.0)])
+    assert sorted(w.cause for w in world.warnings()) == ["dangerous animal", "suspicious person"]  # a new cause
 
 
 def test_unanswered_yellow_warning_is_dismissed_by_the_fallback_policy(world):
@@ -531,7 +409,7 @@ def test_unanswered_yellow_warning_is_dismissed_by_the_fallback_policy(world):
     world.controller.check_timeouts()
     dismissed = world.warnings(sid)[0]
     assert (dismissed.status, dismissed.resolved_by) == ("dismissed", "fallback_policy")
-    assert not world.alarms() and world.interpreters.resumed == [sid]
+    assert not world.alarms()
 
 
 def test_unanswered_orange_warning_is_elevated_by_the_fallback_policy(world):
@@ -550,7 +428,6 @@ def test_if_nobody_can_be_reached_the_fallback_policy_applies_at_once(world):
     assert world.warnings(sid)[0].status == "elevated" and world.warnings(sid)[0].resolved_by == "fallback_policy"
     assert [a.origin for a in world.alarms(sid)] == ["fallback_policy"]
     assert {n.status for n in world.rows(Notification)} == {"failed"}
-    assert world.status(sid) == "active" and world.interpreters.resumed == [sid]
 
 
 @pytest.mark.parametrize("hour, colour", [(12, "yellow"), (23, "orange"), (5, "orange"), (6, "yellow")])

@@ -13,7 +13,8 @@ from ai_alarm.kb import KnowledgeBase
 
 TEMPLATES = {
     "suspicious person": "A suspicious person was detected in {area}.",
-    "strong suspicion": "A person in {area} is strongly suspected of a break-in.",
+    "suspicious weather": "The weather in {area} does not match the forecast.",
+    "strong suspicion": "A strongly suspicious situation was detected in {area}.",
     "unpermitted entry": "A person entered {area} without permission.",
     "dangerous animal": "A dangerous animal was detected in {area}.",
     "vision obstructed": "The view of the camera in {area} is obstructed.",

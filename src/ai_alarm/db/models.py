@@ -254,7 +254,7 @@ class Situation(Base):
 
     __tablename__ = "situation"
     __table_args__ = (
-        one_of("status", "active", "waiting_for_user", "resolved"),
+        one_of("status", "active", "resolved"),
         Index("ix_situation_area_status", "area_id", "status"),
     )
 
