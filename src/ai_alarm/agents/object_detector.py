@@ -1,17 +1,17 @@
 """Object Detector: detects and classifies the objects of an anomaly in a video/image."""
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import model_validator
 
 from ai_alarm.agents.base import Agent, InvalidResponse
-from ai_alarm.signals import BBox, Media, Part, Score, SignalBase
+from ai_alarm.signals import BBox, Media, Part, Score, SituationSignal
 
 AnomalyClass = Literal["person", "animal", "weather_environment", "sensor_artefact", "unclear"]
 
 
-class ObjectDetectorRequest(SignalBase):
+class ObjectDetectorRequest(SituationSignal):
     type: Literal["detect_objects"] = "detect_objects"
     evidence: Media
     area_id: str
@@ -42,7 +42,7 @@ class ObjectRelation(Part):
     object: str  # object_id
 
 
-class ObjectDetectorResponse(SignalBase):
+class ObjectDetectorResponse(SituationSignal):
     type: Literal["objects_detected"] = "objects_detected"
     anomaly_class: AnomalyClass
     objects: list[DetectedObject]
@@ -62,7 +62,12 @@ a woman carrying a crowbar). For persons also give their likely role (e.g. deliv
 confidence. Classify the anomaly as person, animal, weather_environment, sensor_artefact or unclear.
 Use sensor_artefact (e.g. lens flare, compression glitch, insect on the lens) only if the anomaly shows no object;
 then also set sensor_artefact to true. Set obscured to true if the view of the camera is blocked.
+You also get the `known_roles` of the house. Use one of them for a person if it fits; otherwise name the role in
+your own words.
 """
+
+    def context(self, request: ObjectDetectorRequest) -> dict[str, Any]:
+        return {"known_roles": self.kb.role_names()}
 
     def postprocess(self, request: ObjectDetectorRequest, response: ObjectDetectorResponse) -> ObjectDetectorResponse:
         ids = [o.object_id for o in response.objects]

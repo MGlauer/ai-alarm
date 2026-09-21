@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from sqlalchemy import Engine, create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
 
 from ai_alarm.db.models import Base
 
@@ -22,6 +23,11 @@ def make_engine(url: str = DEFAULT_URL) -> Engine:
     engine = create_engine(url)
     event.listen(engine, "connect", _sqlite_pragmas)
     return engine
+
+
+def make_session_factory(engine: Engine) -> sessionmaker[Session]:
+    """Sessions whose objects stay readable after a commit (no reload on access)."""
+    return sessionmaker(engine, expire_on_commit=False)
 
 
 def init_db(engine: Engine) -> None:

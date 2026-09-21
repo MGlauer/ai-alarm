@@ -4,18 +4,18 @@ from __future__ import annotations
 from typing import Literal
 
 from ai_alarm.agents.base import Agent, InvalidResponse
-from ai_alarm.signals import Media, Score, SignalBase
+from ai_alarm.signals import Media, Score, SituationSignal
 
 NoiseCategory = Literal["human_activity", "animal", "weather", "technical_noise", "unknown"]
 
 
-class NoiseInterpreterRequest(SignalBase):
+class NoiseInterpreterRequest(SituationSignal):
     type: Literal["interpret_noise"] = "interpret_noise"
     evidence: Media
     area_id: str
 
 
-class NoiseInterpreterResponse(SignalBase):
+class NoiseInterpreterResponse(SituationSignal):
     type: Literal["noise_interpreted"] = "noise_interpreted"
     category: NoiseCategory
     confidence: Score

@@ -1,13 +1,13 @@
 """Behavioural Interpreter: predicts the intentions and interrelations of the persons in a sequence of frames."""
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field
 
 from ai_alarm.agents.base import Agent, InvalidResponse
 from ai_alarm.agents.person_identifier import Verdict
-from ai_alarm.signals import Media, Part, Score, SignalBase
+from ai_alarm.signals import Media, Part, Score, SituationSignal
 
 Intent = Literal[
     "delivery", "pickup", "ring_the_bell", "move_to_area", "invite_person", "accompany_person",
@@ -22,7 +22,7 @@ class PersonContext(Part):
     predicted_role: str | None = None  # role predicted by the object detector
 
 
-class BehaviouralInterpreterRequest(SignalBase):
+class BehaviouralInterpreterRequest(SituationSignal):
     type: Literal["interpret_behaviour"] = "interpret_behaviour"
     evidence: list[Media] = Field(min_length=1)  # frames
     persons: list[PersonContext] = Field(min_length=1)
@@ -46,7 +46,7 @@ class PersonRelation(Part):
     object: str  # object_id
 
 
-class BehaviouralInterpreterResponse(SignalBase):
+class BehaviouralInterpreterResponse(SituationSignal):
     type: Literal["behaviour_interpreted"] = "behaviour_interpreted"
     persons: list[IntentAssessment]
     relations: list[PersonRelation] = []
@@ -64,8 +64,12 @@ For every given person return their intents ranked by confidence, choosing from:
 move_to_area, invite_person, accompany_person, health_emergency, unknown_activity, suspicious_activity.
 Also return role_mismatch (0..1): how badly the most likely intent fits the person's role (0 = fits, 1 = does not
 fit at all). Report relations between persons (accompanies, invites) and set health_emergency to true if you
-suspect one.
+suspect one. You also get the `area` where this happens, with the areas it is connected to and whether it is the
+entryway or the drop-off point for deliveries.
 """
+
+    def context(self, request: BehaviouralInterpreterRequest) -> dict[str, Any]:
+        return {"area": self.kb.area_info(request.area_id)}
 
     def postprocess(
         self, request: BehaviouralInterpreterRequest, response: BehaviouralInterpreterResponse

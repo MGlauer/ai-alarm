@@ -5,11 +5,11 @@ An agent is a stateless function: request signal in, response signal out. The ba
 that is the same for all agents:
 
 1. validate the incoming request against its schema,
-2. hand the request content and the response schema to the model,
+2. hand the request content, the knowledge base data it needs (`context`) and the response schema to the model,
 3. add the signal envelope (id, time, situation, reply-to) to the model's answer,
 4. validate the outgoing response against its schema and the agent's consistency rules.
 
-Subclasses only declare their signal types and prompt, and may override `postprocess`.
+Subclasses declare their signal types and prompt, and may override `context` and `postprocess`.
 Timeouts, retries and the treatment of an invalid response as "no response" are the caller's job (the SI).
 """
 from __future__ import annotations
@@ -20,13 +20,14 @@ from typing import Any, Generic, Protocol, TypeVar
 
 from pydantic import ValidationError
 
-from ai_alarm.signals import SignalBase
+from ai_alarm.kb import KnowledgeBase
+from ai_alarm.signals import SituationSignal
 
-Req = TypeVar("Req", bound=SignalBase)
-Resp = TypeVar("Resp", bound=SignalBase)
+Req = TypeVar("Req", bound=SituationSignal)
+Resp = TypeVar("Resp", bound=SituationSignal)
 
 # Set by the agent, never by the model.
-ENVELOPE_FIELDS = frozenset(SignalBase.model_fields) | {"type"}
+ENVELOPE_FIELDS = frozenset(SituationSignal.model_fields) | {"type"}
 
 
 class Model(Protocol):
@@ -45,19 +46,21 @@ class Agent(Generic[Req, Resp]):
     request_type: type[Req]
     response_type: type[Resp]
 
-    def __init__(self, model: Model):
+    def __init__(self, model: Model, kb: KnowledgeBase):
         self.model = model
+        self.kb = kb
 
     def handle(self, request: Req | dict[str, Any]) -> Resp:
         """Process one request signal. Raises `InvalidResponse` if the model's answer is unusable.
 
-        A malformed *request* raises pydantic's `ValidationError`: that is a bug of the caller, not of the model.
-        Errors of the model backend itself (timeout, connection) are not caught here.
+        A malformed request (`ValidationError`), or one that refers to something the knowledge base does not have
+        (e.g. `UnknownArea`), is a bug of the caller, not of the model. Errors of the model backend itself (timeout,
+        connection) are not caught.
         """
         req = self.request_type.model_validate(request)
         answer = self.model(
             system=self.system_prompt,
-            request=req.model_dump(mode="json", exclude=ENVELOPE_FIELDS),
+            request={**req.model_dump(mode="json", exclude=ENVELOPE_FIELDS), **self.context(req)},
             schema=self.content_schema,
         )
         if not isinstance(answer, dict):
@@ -67,6 +70,10 @@ class Agent(Generic[Req, Resp]):
         except ValidationError as e:
             raise InvalidResponse(f"{self.name}: {e}") from e
         return self.postprocess(req, resp)
+
+    def context(self, request: Req) -> dict[str, Any]:
+        """Knowledge base data the model needs besides the request. Nothing by default."""
+        return {}
 
     def postprocess(self, request: Req, response: Resp) -> Resp:
         """Hook for the agent's consistency rules.

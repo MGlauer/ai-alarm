@@ -11,9 +11,9 @@ from sqlalchemy.orm import Session
 from ai_alarm.db import make_engine, init_db
 
 from ai_alarm.db.models import (
-    Area, AreaConnection, Base, Contact, IdempotencyKey, LogEntry, Notification, PermissionRule, Person,
-    PersonImage, PersonPresence, Role, Sensor, SensorEvent, Situation, SituationAlarm, SituationSummary,
-    SituationWarning,
+    AggregatedSummary, Area, AreaConnection, Base, Contact, IdempotencyKey, LogEntry, Notification,
+    PermissionRule, Person, PersonImage, PersonPresence, Role, Scenario, Sensor, SensorEvent, Situation,
+    SituationAlarm, SituationSummary, SituationWarning,
 )
 
 NOW = datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc)
@@ -24,7 +24,8 @@ def session():
     engine = make_engine("sqlite://")
     init_db(engine)
     with Session(engine) as s:
-        s.add_all([Area(id="entry", name="Entryway", is_entryway=True), Area(id="garden", name="Garden")])
+        s.add_all([Area(id="entry", name="Entryway", is_entryway=True), Area(id="garden", name="Garden"),
+                   Scenario(id="scn")])
         s.commit()
         yield s
     engine.dispose()
@@ -55,13 +56,14 @@ def test_foreign_keys_are_enforced(session):
 
 # ------------------------------------------------------------------ values
 def test_timestamps_roundtrip_as_utc_and_naive_ones_are_refused(session):
-    session.add(Situation(id="s1", area_id="garden", created_at=NOW.astimezone(timezone(timedelta(hours=2)))))
+    plus_two_hours = timezone(timedelta(hours=2))
+    session.add(Situation(id="s1", scenario_id="scn", area_id="garden", created_at=NOW.astimezone(plus_two_hours)))
     session.commit()
     session.expire_all()
     stored = session.get(Situation, "s1").created_at
     assert stored == NOW and stored.utcoffset() == timedelta(0)
 
-    session.add(Situation(id="s2", area_id="garden", created_at=datetime(2026, 1, 1)))
+    session.add(Situation(id="s2", scenario_id="scn", area_id="garden", created_at=datetime(2026, 1, 1)))
     with pytest.raises(Exception, match="naive datetime"):
         session.commit()
 
@@ -73,11 +75,11 @@ def test_scores_must_be_in_unit_interval(session):
 
 def test_enumerated_columns_are_checked(session):
     rejected(session, Sensor(id="cam1", kind="radar", area_id="garden", x=0, y=0))
-    rejected(session, Situation(id="s1", area_id="garden", status="sleeping"))
+    rejected(session, Situation(id="s1", scenario_id="scn", area_id="garden", status="sleeping"))
 
 
 def test_json_columns_roundtrip(session):
-    session.add(Situation(id="s1", area_id="garden"))
+    session.add(Situation(id="s1", scenario_id="scn", area_id="garden"))
     session.add(SituationSummary(situation_id="s1", threat_score=0.4, summary="a person",
                                  data={"objects": [{"object_id": "p1", "bbox": {"x": 0.1}}]}))
     session.commit()
@@ -135,7 +137,7 @@ def test_people_currently_in_an_area(session):
 def make_situation(session, sid="s1"):
     session.add_all([
         Sensor(id="cam1", kind="camera", area_id="garden", x=1, y=2, orientation_deg=90),
-        Situation(id=sid, area_id="garden"),
+        Situation(id=sid, scenario_id="scn", area_id="garden"),
     ])
     session.commit()
 
@@ -261,3 +263,20 @@ def test_area_connection_and_rule_role_by_attribute(session):
     assert (link.area_a.name, link.area_b.name) == ("Entryway", "Garden")
     assert session.scalars(select(PermissionRule)).one().role.name == "family"
     assert session.scalars(select(Contact)).all() == []  # a contact needs no person
+
+
+def test_scenario_groups_situations_and_aggregated_summaries(session):
+    make_situation(session, "s1")
+    session.add(Situation(id="s2", scenario_id="scn", area_id="entry"))
+    session.add(AggregatedSummary(scenario_id="scn", threat_score=0.4, summary="two situations"))
+    session.commit()
+    session.expire_all()
+    scenario = session.get(Scenario, "scn")
+    assert scenario.status == "active" and [x.id for x in scenario.situations] == ["s1", "s2"]
+    assert scenario.aggregated_summaries[0].scenario is scenario and session.get(Situation, "s2").scenario is scenario
+
+
+def test_a_situation_needs_a_scenario_and_scenario_status_is_checked(session):
+    rejected(session, Situation(id="s1", area_id="garden"))
+    rejected(session, Situation(id="s2", scenario_id="nowhere", area_id="garden"))
+    rejected(session, Scenario(id="scn2", status="sleeping"))

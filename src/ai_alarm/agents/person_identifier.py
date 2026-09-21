@@ -1,19 +1,20 @@
 """Person Identifier: matches a person in an image/video against the reference images of the knowledge base."""
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import model_validator
 
-from ai_alarm.agents.base import Agent, Model
-from ai_alarm.signals import BBox, Media, Score, SignalBase
+from ai_alarm.agents.base import Agent, InvalidResponse, Model
+from ai_alarm.kb import KnowledgeBase
+from ai_alarm.signals import BBox, Media, Score, SituationSignal
 
 Verdict = Literal["known", "unknown", "not_decidable"]
 # "unavailable" is not in this list: only the SI sets it, when the agent does not answer.
 NotDecidableCause = Literal["clothing", "object on person", "external object", "low confidence", "unknown"]
 
 
-class PersonIdentifierRequest(SignalBase):
+class PersonIdentifierRequest(SituationSignal):
     type: Literal["identify_person"] = "identify_person"
     video: Media | None = None
     image: Media | None = None
@@ -27,7 +28,7 @@ class PersonIdentifierRequest(SignalBase):
         return self
 
 
-class PersonIdentifierResponse(SignalBase):
+class PersonIdentifierResponse(SituationSignal):
     type: Literal["identification"] = "identification"
     verdict: Verdict
     person: str | None = None  # person id, only for "known"; name, roles etc. are looked up in the knowledge base
@@ -51,7 +52,7 @@ class PersonIdentifier(Agent[PersonIdentifierRequest, PersonIdentifierResponse])
     response_type = PersonIdentifierResponse
     prompt = """
 You identify the person at the given bounding box in the image or video by comparing them to the reference
-images of the known persons.
+images of the known persons, which are given as `references` (person_id and image files).
 - verdict "known": the person matches a known person. Give that person's id and your confidence (0..1).
 - verdict "unknown": a person is visible but matches nobody.
 - verdict "not_decidable": you cannot tell, e.g. because of a hood, an umbrella or another obstruction.
@@ -59,13 +60,18 @@ images of the known persons.
 Never guess a person id.
 """
 
-    def __init__(self, model: Model, threshold: float = 0.7):
-        super().__init__(model)
+    def __init__(self, model: Model, kb: KnowledgeBase, threshold: float = 0.7):
+        super().__init__(model, kb)
         self.threshold = threshold  # a match below this confidence is reported as not decidable
+
+    def context(self, request: PersonIdentifierRequest) -> dict[str, Any]:
+        return {"references": self.kb.reference_images()}
 
     def postprocess(
         self, request: PersonIdentifierRequest, response: PersonIdentifierResponse
     ) -> PersonIdentifierResponse:
+        if response.verdict == "known" and not self.kb.person_exists(response.person):
+            raise InvalidResponse(f"{self.name}: '{response.person}' is not a person in the knowledge base")
         if response.verdict == "known" and response.confidence < self.threshold:
             return response.model_copy(
                 update={"verdict": "not_decidable", "person": None, "confidence": None, "cause": "low confidence"}

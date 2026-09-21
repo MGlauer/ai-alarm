@@ -6,12 +6,12 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from ai_alarm.agents.base import Agent
-from ai_alarm.signals import Media, Part, Score, SignalBase
+from ai_alarm.signals import Media, Part, Score, SituationSignal
 
 WeatherCondition = Literal["high_wind", "snowfall", "fog", "rain", "cloudy", "sunny", "unknown"]
 
 
-class WeatherInterpreterRequest(SignalBase):
+class WeatherInterpreterRequest(SituationSignal):
     type: Literal["interpret_weather"] = "interpret_weather"
     evidence: Media
     area_id: str
@@ -29,7 +29,7 @@ class ObservedCondition(Part):
         return self
 
 
-class WeatherInterpreterResponse(SignalBase):
+class WeatherInterpreterResponse(SituationSignal):
     type: Literal["weather_interpreted"] = "weather_interpreted"
     conditions: list[ObservedCondition] = Field(min_length=1)
 

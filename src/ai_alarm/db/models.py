@@ -4,7 +4,7 @@ Four groups of tables:
 * knowledge base (DESIGN_DOCUMENT "Knowledge Base"): Role, Person, PersonImage, Area, AreaConnection, EntryPoint,
   PermissionRule, Sensor, PersonPresence
 * recipients of the communication unit: Contact
-* what the controller and the situation interpreters produce: Situation, SensorEvent, SituationSummary,
+* what the controller and the situation interpreters produce: Scenario, Situation, SensorEvent, SituationSummary,
   AggregatedSummary, SituationWarning, SituationAlarm, Notification
 * bookkeeping: IdempotencyKey, LogEntry
 
@@ -231,8 +231,26 @@ class Contact(Base):
 
 
 # ====================================================================== situations
+class Scenario(Base):
+    """Everything that is going on together. It starts with the first event and lasts until all of its situations
+    are resolved. Warnings and alarms are idempotent per scenario: several situations reaching the same conclusion
+    trigger it once."""
+
+    __tablename__ = "scenario"
+    __table_args__ = (one_of("status", "active", "resolved"),)
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=new_id("scn"))
+    status: Mapped[str] = mapped_column(default="active")
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    resolved_at: Mapped[datetime | None]
+
+    situations: Mapped[list[Situation]] = relationship(back_populates="scenario", order_by="Situation.created_at")
+    aggregated_summaries: Mapped[list[AggregatedSummary]] = relationship(
+        back_populates="scenario", order_by="AggregatedSummary.created_at")
+
+
 class Situation(Base):
-    """One instance of the situation interpreter; its id is also the workflow's checkpoint thread id."""
+    """One instance of the situation interpreter (one per area); its id is also the workflow's checkpoint thread id."""
 
     __tablename__ = "situation"
     __table_args__ = (
@@ -241,12 +259,14 @@ class Situation(Base):
     )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=new_id("sit"))
+    scenario_id: Mapped[str] = mapped_column(ForeignKey("scenario.id"), index=True)
     area_id: Mapped[str] = mapped_column(ForeignKey("area.id"))
     status: Mapped[str] = mapped_column(default="active")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
     resolved_at: Mapped[datetime | None]
 
+    scenario: Mapped[Scenario] = relationship(back_populates="situations")
     area: Mapped[Area] = relationship()
     events: Mapped[list[SensorEvent]] = relationship(
         back_populates="situation", order_by="SensorEvent.start_time")
@@ -295,16 +315,19 @@ class SituationSummary(Base):
 
 
 class AggregatedSummary(Base):
-    """The controller's amalgamation of the summaries of all active situations."""
+    """The controller's amalgamation of the latest summaries of the unresolved situations of a scenario."""
 
     __tablename__ = "aggregated_summary"
     __table_args__ = scores("threat_score")
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    scenario_id: Mapped[str] = mapped_column(ForeignKey("scenario.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     threat_score: Mapped[float]
     summary: Mapped[str] = mapped_column(Text)  # display only
     data: Mapped[dict[str, Any]] = mapped_column(default=dict)  # e.g. situation ids, combined suspicion per person
+
+    scenario: Mapped[Scenario] = relationship(back_populates="aggregated_summaries")
 
 
 class SituationWarning(Base):
@@ -382,7 +405,7 @@ class Notification(Base):
 
 # ====================================================================== bookkeeping
 class IdempotencyKey(Base):
-    """Keys of warnings, alarms and speaker signals that were already sent, e.g. `<situation_id>:<cause>`."""
+    """Keys of warnings, alarms and speaker signals that were already sent, e.g. `alarm:<scenario_id>:<cause>`."""
 
     __tablename__ = "idempotency_key"
     __table_args__ = (one_of("kind", "warning", "alarm", "speak"),)

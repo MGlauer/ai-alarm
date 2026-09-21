@@ -19,8 +19,13 @@ class SignalBase(BaseModel):
     type: str
     signal_id: str = Field(default_factory=lambda: f"sig_{uuid.uuid4().hex}")
     sent_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    situation_id: str
     in_reply_to: str | None = None  # signal_id of the request; only set on responses
+
+
+class SituationSignal(SignalBase):
+    """A signal that belongs to a situation. (Raw sensor events do not: they exist before their situation.)"""
+
+    situation_id: str
 
 
 class Part(BaseModel):
