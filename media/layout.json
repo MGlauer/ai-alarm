@@ -1,0 +1,126 @@
+{
+  "areas": [
+    {
+      "id": "entry",
+      "name": "Entryway",
+      "is_entryway": true
+    },
+    {
+      "id": "garden",
+      "name": "Garden"
+    },
+    {
+      "id": "house",
+      "name": "House"
+    },
+    {
+      "id": "driveway",
+      "name": "Driveway"
+    },
+    {
+      "id": "backyard",
+      "name": "Backyard"
+    }
+  ],
+  "connections": [
+    [
+      "entry",
+      "garden"
+    ],
+    [
+      "entry",
+      "house"
+    ],
+    [
+      "entry",
+      "driveway"
+    ],
+    [
+      "garden",
+      "backyard"
+    ],
+    [
+      "house",
+      "backyard"
+    ]
+  ],
+  "sensors": [
+    {
+      "id": "cam_entry",
+      "kind": "camera",
+      "area_id": "entry"
+    },
+    {
+      "id": "mic_entry",
+      "kind": "microphone",
+      "area_id": "entry"
+    },
+    {
+      "id": "cam_garden",
+      "kind": "camera",
+      "area_id": "garden"
+    },
+    {
+      "id": "mic_garden",
+      "kind": "microphone",
+      "area_id": "garden"
+    },
+    {
+      "id": "cam_house",
+      "kind": "camera",
+      "area_id": "house"
+    },
+    {
+      "id": "cam_driveway",
+      "kind": "camera",
+      "area_id": "driveway"
+    },
+    {
+      "id": "mic_driveway",
+      "kind": "microphone",
+      "area_id": "driveway"
+    },
+    {
+      "id": "cam_backyard",
+      "kind": "camera",
+      "area_id": "backyard"
+    },
+    {
+      "id": "mic_backyard",
+      "kind": "microphone",
+      "area_id": "backyard"
+    }
+  ],
+  "speakers": [
+    {
+      "id": "spk_entry",
+      "area_id": "entry"
+    },
+    {
+      "id": "spk_garden",
+      "area_id": "garden"
+    },
+    {
+      "id": "spk_driveway",
+      "area_id": "driveway"
+    },
+    {
+      "id": "spk_backyard",
+      "area_id": "backyard"
+    }
+  ],
+  "entry_points": [
+    {
+      "id": "front_door",
+      "name": "Front door",
+      "area_id": "entry",
+      "is_open": false
+    },
+    {
+      "id": "garden_gate",
+      "name": "Garden gate",
+      "area_id": "backyard",
+      "is_open": false
+    }
+  ]
+}
