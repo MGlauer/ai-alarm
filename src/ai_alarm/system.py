@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from pathlib import Path
 from datetime import datetime
 from typing import Callable, Mapping
 
@@ -28,12 +29,15 @@ from ai_alarm.workflow import SituationWorkflows, WorkflowConfig, make_checkpoin
 
 log = logging.getLogger(__name__)
 
+FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"  # served if the frontend is built
+ASSETS_DIR = Path(__file__).resolve().parents[2] / "media"  # sprites/layout/pre-rendered scenes, see sensors/processor.py
+
 
 class System:
     def __init__(
         self, db_url: str = DEFAULT_URL, checkpoint_path: str = "data/checkpoints/checkpoints.db", *,
-        seed: bool = True, demos: Mapping[str, Demo] = DEMOS, clock: Callable[[], datetime] = utcnow,
-        tick_interval_s: float = 5,
+        seed: bool = True, frontend_dir: Path | None = FRONTEND_DIR, assets_dir: Path = ASSETS_DIR,
+        demos: Mapping[str, Demo] = DEMOS, clock: Callable[[], datetime] = utcnow, tick_interval_s: float = 5,
         controller_config: ControllerConfig = ControllerConfig(), workflow_config: WorkflowConfig = WorkflowConfig(),
         comm_config: CommConfig = CommConfig(),
     ):
@@ -47,7 +51,7 @@ class System:
         self.kb = KnowledgeBase(self.session_factory)
 
         # simulated outside world
-        self.processor = CctvAudioProcessor(self.session_factory, dict(demos), clock=clock)
+        self.processor = CctvAudioProcessor(self.session_factory, dict(demos), clock=clock, assets_dir=assets_dir)
         self.speaker, self.gateway = SimulatedSpeaker(clock), SimulatedTextGateway(clock)
         self.forecast = WeatherForecastFetcher(
             lambda: self.processor.demo.forecast(clock()) if self.processor.demo else [], clock)
@@ -75,7 +79,8 @@ class System:
             behavioural_interpreter=agents["behavioural_interpreter"], noise_interpreter=agents["noise_interpreter"],
             config=controller_config, clock=clock)
         self.workflows.controller = self.controller
-        self.app: Flask = create_app(self.session_factory, self.controller, simulation=self)
+        self.app: Flask = create_app(
+            self.session_factory, self.controller, simulation=self, static_dir=frontend_dir, assets_dir=assets_dir)
 
     def _seed_if_empty(self) -> None:
         with self.session_factory() as s:
@@ -93,6 +98,18 @@ class System:
         """Let the simulated processors report the anomalies of a demo. Raises `LookupError` for an unknown demo."""
         self.forecast.clear_cache()  # the simulated weather service has a new forecast for each demo
         self.processor.play(name, self.controller.handle_sensor_event, time_scale, wait)
+
+    def frame(self, **kwargs) -> bytes:
+        return self.processor.frame(**kwargs)
+
+    def idle_frame(self, **kwargs) -> bytes:
+        return self.processor.idle_frame(**kwargs)
+
+    def audio(self, **kwargs) -> bytes:
+        return self.processor.audio(**kwargs)
+
+    def idle_audio(self, **kwargs) -> bytes:
+        return self.processor.idle_audio(**kwargs)
 
     # ------------------------------------------------------------------ running
     def start(self) -> None:

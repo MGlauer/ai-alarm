@@ -269,7 +269,7 @@ class SituationWorkflows:
                 identity, person_id, cause = answer.verdict, answer.person, answer.cause
             info = self.kb.person(person_id) if person_id else None
             found.append({"object": o, "identity": identity, "person_id": person_id, "cause": cause,
-                          "kb_roles": list(info.roles) if info else []})
+                          "name": info.name if info else None, "kb_roles": list(info.roles) if info else []})
 
         contexts = [PersonContext(object_id=f["object"]["object_id"], verdict=f["identity"], kb_roles=f["kb_roles"],
                                   predicted_role=f["object"].get("role")) for f in found]
@@ -292,15 +292,16 @@ class SituationWorkflows:
                 behaviour_part = max([assessed.role_mismatch] + [
                     i.confidence for i in assessed.intents if i.intent == "suspicious_activity"])
             assessments.append(PersonAssessment(
-                object_id=object_id, identity=f["identity"], person_id=f["person_id"], cause=f["cause"],
-                predicted_role=predicted, suspicion=max(role_part, behaviour_part), invited=object_id in invited))
+                object_id=object_id, identity=f["identity"], person_id=f["person_id"], name=f["name"],
+                cause=f["cause"], predicted_role=predicted, suspicion=max(role_part, behaviour_part),
+                invited=object_id in invited, bbox=f["object"]["bbox"]))
         return {"persons": [a.model_dump(mode="json") for a in assessments],
                 "contexts": [c.model_dump(mode="json") for c in contexts],
                 "health_emergency": bool(behaviour and behaviour.health_emergency)}
 
     @staticmethod
     def _animals(state: State) -> dict[str, Any]:
-        animals = [AnimalAssessment(label=o["label"], danger=animal_danger(o["label"]))
+        animals = [AnimalAssessment(label=o["label"], danger=animal_danger(o["label"]), bbox=o.get("bbox"))
                    for o in state["detection"]["objects"] if o["kind"] == "animal"]
         return {"animals": [a.model_dump(mode="json") for a in animals]}
 
@@ -359,7 +360,8 @@ class SituationWorkflows:
         """Tell the controller. (Repeated after a crash: the controller's idempotency keys protect the side effects.)"""
         sid, area_id, summary = state["situation_id"], state["area_id"], state["summary"]
         self.controller.handle_situation_summary(SituationSummarySignal(
-            situation_id=sid, area_id=area_id, summary=summary["text"], threat_score=summary["threat_score"],
+            situation_id=sid, area_id=area_id, event_id=state["event"]["id"], summary=summary["text"],
+            threat_score=summary["threat_score"],
             persons=[PersonAssessment.model_validate(p) for p in state["persons"]],
             animals=[AnimalAssessment.model_validate(a) for a in state["animals"]],
             weather_suspicion=(state.get("weather") or {}).get("score", 0.0), unclear_situation=summary["unclear"]))

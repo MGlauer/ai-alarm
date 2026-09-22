@@ -61,10 +61,12 @@ class PersonAssessment(Part):
     object_id: str
     identity: Verdict
     person_id: str | None = None  # the knowledge base id, for identity "known" only
+    name: str | None = None  # display name from the knowledge base, for identity "known" only (may still be unset)
     cause: str | None = None  # why not decidable, incl. "unavailable"
     predicted_role: str | None = None
     suspicion: Score  # of this person (role and behaviour mismatch etc.)
     invited: bool = False  # invited or accompanied by a family member in the immediate past
+    bbox: BBox | None = None  # where they are in the evidence of the event this assessment is based on
 
     @model_validator(mode="after")
     def _known_persons_have_an_id(self):
@@ -76,6 +78,7 @@ class PersonAssessment(Part):
 class AnimalAssessment(Part):
     label: str
     danger: Score  # the pre-defined danger score of this kind of animal
+    bbox: BBox | None = None  # where it is in the evidence of the event this assessment is based on
 
 
 class SituationSummarySignal(SituationSignal):
@@ -83,6 +86,7 @@ class SituationSummarySignal(SituationSignal):
 
     type: Literal["situation_summary"] = "situation_summary"
     area_id: str
+    event_id: str  # the sensor event this interpretation is based on, so its evidence can be shown with it
     summary: str
     threat_score: Score  # the maximum of the scores of the individual objects/events
     persons: list[PersonAssessment] = []
@@ -230,7 +234,7 @@ class Controller:
             combined = self._store_summary(signal, now)
             stays = self._record_persons(signal, combined, now)
             self._check_suspicion(signal, combined)
-            self._check_permissions(signal, stays, now)
+            self._check_permissions(signal, combined, stays, now)
             self._check_animals(signal, now)
             if signal.unclear_situation and signal.threat_score >= self.config.warning_threshold:
                 self._warn(signal.situation_id, signal.area_id, "unclear situation", signal.threat_score)
@@ -301,13 +305,21 @@ class Controller:
             elif suspicion > self.config.warning_threshold:
                 self._warn(signal.situation_id, signal.area_id, cause, signal.threat_score)
 
-    def _check_permissions(self, signal: SituationSummarySignal, stays: dict[str, float], now: datetime) -> None:
+    def _check_permissions(
+        self, signal: SituationSummarySignal, combined: dict[str, float], stays: dict[str, float], now: datetime
+    ) -> None:
         sid, area_id = signal.situation_id, signal.area_id
         for p in signal.persons:
             info = self.kb.person(p.person_id) if p.person_id else None
             roles = list(info.roles) if info else [p.predicted_role] if p.predicted_role else []
             familiar = info is not None and info.familiarity >= self.config.familiar_threshold
             if self.kb.entry_permitted(area_id, roles, info is not None, familiar, p.invited, stays[p.object_id]):
+                continue
+            if combined[self._person_key(sid, p)] > self.config.alarm_threshold:
+                # already alarmed by _check_suspicion: a redundant "please leave or we'll call the police" warning
+                # asking a human to decide doesn't add up when that decision has already been made for them. The
+                # audible warning still makes sense on its own, though, so it is not skipped.
+                self._speak(sid, "unpermitted entry", UNPERMITTED_ENTRY_TEXT)
                 continue
             self._warn(sid, area_id, "unpermitted entry", signal.threat_score, speak=UNPERMITTED_ENTRY_TEXT)
             if self._entry_is_prolonged(sid, now):
@@ -324,6 +336,13 @@ class Controller:
 
     def _check_animals(self, signal: SituationSummarySignal, now: datetime) -> None:
         if not any(a.danger >= self.config.dangerous_animal_threshold for a in signal.animals):
+            return
+        # an animal at the very top of the danger scale (danger 1.0, e.g. a bear) is too dangerous to sit as a
+        # warning under any circumstances -- asking a human to decide would be moot. Anything merely dangerous
+        # (at or above dangerous_animal_threshold but below the maximum) still goes through the door/people/time
+        # context below, same as before.
+        if any(a.danger >= 1.0 for a in signal.animals):
+            self._alarm(signal.situation_id, signal.area_id, "dangerous animal", "rule")
             return
         window = self.config.animal_alarm_window
         if (self.kb.has_open_entry_point()

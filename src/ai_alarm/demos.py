@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Mapping
 
 from ai_alarm.weather import ForecastEntry
 
@@ -20,6 +20,7 @@ class ScriptedEvent:
     sensor_id: str
     evidence: str  # reference of the recorded clip
     bbox: dict[str, float] | None = None  # rough area of the anomaly (video only)
+    night: bool = False  # cosmetic only: for the synthetic camera frame (media.py)
 
 
 @dataclass(frozen=True)
@@ -60,14 +61,19 @@ def _behaviour(*intents: tuple[str, float], role_mismatch: float = 0.0) -> dict[
 
 
 def _clip(demo: str, n: int = 1) -> str:
-    return f"demo/{demo}/clip_{n}.mp4"
+    return f"demo/{demo}/clip_{n}.gif"  # an animated clip (media.py), not a real video codec
 
 
-def _single(name: str, description: str, sensor_id: str, **answers: dict[str, Any]) -> Demo:
+def _single(name: str, description: str, sensor_id: str, *, night: bool = False,
+           **answers: dict[str, Any]) -> Demo:
     """A demo with one event; `answers` are the answers per agent for its clip."""
     clip = _clip(name)
-    return Demo(name, description, (ScriptedEvent(0, sensor_id, clip, BOX),),
+    return Demo(name, description, (ScriptedEvent(0, sensor_id, clip, BOX, night=night),),
                 {agent: {clip: answer} for agent, answer in answers.items()})
+
+
+def _night(name: str, description: str, sensor_id: str, **answers: dict[str, Any]) -> Demo:
+    return _single(name, description, sensor_id, night=True, **answers)
 
 
 _WIND_VIDEO, _WIND_AUDIO = _clip("wind"), "demo/wind/audio_1.wav"
@@ -106,13 +112,50 @@ DEMOS: dict[str, Demo] = {d.name: d for d in [
             object_detector=_detected("person", _person()),
             person_identifier={"verdict": "not_decidable", "cause": "clothing"},
             behavioural_interpreter=_behaviour(("unknown_activity", 0.7), role_mismatch=0.6)),
-    _single("intruder", "Critical: an unknown person with a crowbar tries the garden door. Alarm.",
-            "cam_garden",
-            object_detector=_detected(
-                "person", _person(), _obj("t1", "object", "crowbar"),
-                relations=({"subject": "p1", "predicate": "carries", "object": "t1"},)),
-            person_identifier={"verdict": "unknown"},
-            behavioural_interpreter=_behaviour(("suspicious_activity", 0.9), role_mismatch=0.9)),
-    _single("bear", "Critical: a bear in the garden. A warning, or an alarm if an entry point of the house is open.",
-            "cam_garden", object_detector=_detected("animal", _obj("a1", "animal", "bear"))),
+    _night("intruder", "Critical: an unknown person with a crowbar tries the garden door. Alarm.",
+           "cam_garden",
+           object_detector=_detected(
+               "person", _person(), _obj("t1", "object", "crowbar", bbox={"x": 0.62, "y": 0.55, "w": 0.1, "h": 0.12}),
+               relations=({"subject": "p1", "predicate": "carries", "object": "t1"},)),
+           person_identifier={"verdict": "unknown"},
+           behavioural_interpreter=_behaviour(("suspicious_activity", 0.9), role_mismatch=0.9)),
+    _night("bear", "Critical: a bear in the garden. A warning, or an alarm if an entry point of the house is open.",
+           "cam_garden", object_detector=_detected("animal", _obj("a1", "animal", "bear"))),
 ]}
+
+
+# ------------------------------------------------------------------ what a piece of evidence is meant to show
+def scene_for_evidence(evidence: str, demos: Mapping[str, Demo]) -> tuple[list[dict], str | None, bool] | None:
+    """What a demo's mock object detector says was in this piece of video evidence, and how to render it: the
+    detected objects, a weather mood ("wind"/"artefact") if any, and whether the scene is at night. Shared by the
+    live sensor stub (sensors/processor.py) and the asset generator (scripts/generate_assets.py), so a clip always
+    matches what the mock pipeline claims to have found in it."""
+    for demo in demos.values():
+        answer = demo.answers.get("object_detector", {}).get(evidence)
+        if answer is None:
+            continue
+        weather = {"weather_environment": "wind", "sensor_artefact": "artefact"}.get(answer["anomaly_class"])
+        night = any(e.evidence == evidence and e.night for e in demo.events)
+        return answer["objects"], weather, night
+    return None
+
+
+def noise_category_for_evidence(evidence: str, demos: Mapping[str, Demo]) -> str | None:
+    """The noise interpreter's mock category for a piece of audio evidence, if any demo scripts one for it."""
+    for demo in demos.values():
+        answer = demo.answers.get("noise_interpreter", {}).get(evidence)
+        if answer is not None:
+            return answer["category"]
+    return None
+
+
+def known_person_for_object(evidence: str, object_id: str, demos: Mapping[str, Demo]) -> str | None:
+    """The knowledge base id a demo's mock person identifier recognises one detected object as, if it is a "known"
+    verdict (the same "<evidence>#<object_id>", falling back to plain evidence, lookup the real agents/mock.py
+    ScriptedModel uses). Lets a generated clip of a known person actually look like their own reference portrait."""
+    for demo in demos.values():
+        answers = demo.answers.get("person_identifier", {})
+        answer = answers.get(f"{evidence}#{object_id}", answers.get(evidence))
+        if answer is not None and answer.get("verdict") == "known":
+            return answer.get("person")
+    return None
