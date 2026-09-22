@@ -32,6 +32,7 @@ function personCard(person: PersonRow): HTMLElement {
   const img = document.createElement("img");
   img.src = person.picture_url;
   img.alt = person.name ?? person.id;
+  img.height = 270;
   img.addEventListener("error", () => img.replaceWith(avatarFallback(person)), { once: true });
   card.appendChild(img);
 
