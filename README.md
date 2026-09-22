@@ -35,13 +35,13 @@ Only the Controller's fixed rules (suspicion/danger thresholds, permission check
 
 ## Quickstart
 
-** Run the backend **
+**Run the backend**
 ```bash
 pip install -e ".[dev]"                 # or use the pre-built .venv/
 python scripts/run_server.py            # API at :5000/api, serves frontend/dist/ if built
 ```
 
-** Run the frontend **
+**Run the frontend**
 
 ```bash
 cd frontend && npm install && npm run build
@@ -93,7 +93,7 @@ schema-valid JSON answer — no change to the agents, workflow, or controller is
 ## Known limitations
 
 - No real vision/LLM model connected (mocked, see above)
-- no authentication
-- no editing of people/areas/rules
+- No authentication
+- No editing of people/areas/rules
 - GDPR/personal-data handling is explicitly out of scope for the challenge
 - SQLite is a challenge-scope stand-in for a production database.
