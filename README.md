@@ -35,19 +35,22 @@ Only the Controller's fixed rules (suspicion/danger thresholds, permission check
 
 ## Quickstart
 
-**Run the backend**
-```bash
-pip install -e ".[dev]"                 # or use the pre-built .venv/
-python scripts/run_server.py            # API at :5000/api, serves frontend/dist/ if built
-```
-
-**Run the frontend**
+**Build the frontend**
 
 ```bash
 cd frontend && npm install && npm run build
 ```
 
-The frontend features several example scenarios. You may run them by choosing one in the "Simulation" tab.
+**Run back- and frontend**
+```bash
+pip install -e ".[dev]"                 # or use the pre-built .venv/
+python scripts/run_server.py            # API at :5000/api, serves frontend/dist/ if built
+```
+
+This starts the backend and the frontend at http://localhost:5000. Should the frontend not be available, you can also
+manually run `npm run dev` in the `frontend` directory.
+
+The frontend features several example scenarios. You may run them by choosing one in the "Simulation" tab and moving back to "Home".
 
 ## Human-in-the-loop (HITL)
 
