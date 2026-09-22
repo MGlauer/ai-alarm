@@ -14,6 +14,7 @@ data is stored as JSON. Enumerated columns are checked by the database (see `one
 Every foreign key column `x_id` has a relationship `x` next to it, so related rows are reached by attribute
 access (`log_entry.situation.status`); the parent side has the matching collection where one is useful.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -21,7 +22,15 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
-    JSON, CheckConstraint, Column, DateTime, ForeignKey, Index, Table, Text, TypeDecorator,
+    JSON,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Table,
+    Text,
+    TypeDecorator,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -67,11 +76,14 @@ class Base(DeclarativeBase):
 class Role(Base):
     __tablename__ = "role"
 
-    name: Mapped[str] = mapped_column(primary_key=True)  # e.g. "family", "delivery person", "gardener"
+    name: Mapped[str] = mapped_column(
+        primary_key=True
+    )  # e.g. "family", "delivery person", "gardener"
 
 
 person_roles = Table(
-    "person_roles", Base.metadata,
+    "person_roles",
+    Base.metadata,
     Column("person_id", ForeignKey("person.id"), primary_key=True),
     Column("role", ForeignKey("role.name"), primary_key=True),
 )
@@ -89,7 +101,9 @@ class Person(Base):
     suspicion: Mapped[float] = mapped_column(default=0.0)
 
     roles: Mapped[list[Role]] = relationship(secondary=person_roles)
-    images: Mapped[list[PersonImage]] = relationship(back_populates="person", cascade="all, delete-orphan")
+    images: Mapped[list[PersonImage]] = relationship(
+        back_populates="person", cascade="all, delete-orphan"
+    )
     presences: Mapped[list[PersonPresence]] = relationship(back_populates="person")
 
 
@@ -112,8 +126,12 @@ class Area(Base):
 
     id: Mapped[str] = mapped_column(primary_key=True)
     name: Mapped[str]
-    is_entryway: Mapped[bool] = mapped_column(default=False)  # where unfamiliar persons may ring the bell
-    is_drop_off: Mapped[bool] = mapped_column(default=False)  # dedicated drop-off point for deliveries
+    is_entryway: Mapped[bool] = mapped_column(
+        default=False
+    )  # where unfamiliar persons may ring the bell
+    is_drop_off: Mapped[bool] = mapped_column(
+        default=False
+    )  # dedicated drop-off point for deliveries
 
     sensors: Mapped[list[Sensor]] = relationship(back_populates="area")
     entry_points: Mapped[list[EntryPoint]] = relationship(back_populates="area")
@@ -146,7 +164,8 @@ class EntryPoint(Base):
 
 
 permission_rule_areas = Table(
-    "permission_rule_areas", Base.metadata,
+    "permission_rule_areas",
+    Base.metadata,
     Column("rule_id", ForeignKey("permission_rule.id"), primary_key=True),
     Column("area_id", ForeignKey("area.id"), primary_key=True),
 )
@@ -224,7 +243,9 @@ class Contact(Base):
     name: Mapped[str]
     phone: Mapped[str]  # where the text notification goes
     is_primary: Mapped[bool] = mapped_column(default=False)
-    person_id: Mapped[str | None] = mapped_column(ForeignKey("person.id"))  # to find contacts within the area
+    person_id: Mapped[str | None] = mapped_column(
+        ForeignKey("person.id")
+    )  # to find contacts within the area
 
     person: Mapped[Person | None] = relationship()
     notifications: Mapped[list[Notification]] = relationship(back_populates="contact")
@@ -244,9 +265,12 @@ class Scenario(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     resolved_at: Mapped[datetime | None]
 
-    situations: Mapped[list[Situation]] = relationship(back_populates="scenario", order_by="Situation.created_at")
+    situations: Mapped[list[Situation]] = relationship(
+        back_populates="scenario", order_by="Situation.created_at"
+    )
     aggregated_summaries: Mapped[list[AggregatedSummary]] = relationship(
-        back_populates="scenario", order_by="AggregatedSummary.created_at")
+        back_populates="scenario", order_by="AggregatedSummary.created_at"
+    )
 
 
 class Situation(Base):
@@ -269,15 +293,20 @@ class Situation(Base):
     scenario: Mapped[Scenario] = relationship(back_populates="situations")
     area: Mapped[Area] = relationship()
     events: Mapped[list[SensorEvent]] = relationship(
-        back_populates="situation", order_by="SensorEvent.start_time")
+        back_populates="situation", order_by="SensorEvent.start_time"
+    )
     summaries: Mapped[list[SituationSummary]] = relationship(
-        back_populates="situation", order_by="SituationSummary.created_at")
+        back_populates="situation", order_by="SituationSummary.created_at"
+    )
     warnings: Mapped[list[SituationWarning]] = relationship(
-        back_populates="situation", order_by="SituationWarning.created_at")
+        back_populates="situation", order_by="SituationWarning.created_at"
+    )
     alarms: Mapped[list[SituationAlarm]] = relationship(
-        back_populates="situation", order_by="SituationAlarm.created_at")
+        back_populates="situation", order_by="SituationAlarm.created_at"
+    )
     log_entries: Mapped[list[LogEntry]] = relationship(
-        back_populates="situation", order_by="LogEntry.created_at")
+        back_populates="situation", order_by="LogEntry.created_at"
+    )
 
 
 class SensorEvent(Base):
@@ -309,7 +338,9 @@ class SituationSummary(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     threat_score: Mapped[float]  # maximum over the individual objects/events
     summary: Mapped[str] = mapped_column(Text)  # display only
-    data: Mapped[dict[str, Any]] = mapped_column(default=dict)  # the annotated agent results the score is based on
+    data: Mapped[dict[str, Any]] = mapped_column(
+        default=dict
+    )  # the annotated agent results the score is based on
 
     situation: Mapped[Situation] = relationship(back_populates="summaries")
 
@@ -325,7 +356,9 @@ class AggregatedSummary(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     threat_score: Mapped[float]
     summary: Mapped[str] = mapped_column(Text)  # display only
-    data: Mapped[dict[str, Any]] = mapped_column(default=dict)  # e.g. situation ids, combined suspicion per person
+    data: Mapped[dict[str, Any]] = mapped_column(
+        default=dict
+    )  # e.g. situation ids, combined suspicion per person
 
     scenario: Mapped[Scenario] = relationship(back_populates="aggregated_summaries")
 
@@ -341,11 +374,15 @@ class SituationWarning(Base):
         one_of("resolved_by", "user", "fallback_policy"),
     )
 
-    id: Mapped[str] = mapped_column(primary_key=True, default=new_id("wrn"))  # warning_id of the signals
+    id: Mapped[str] = mapped_column(
+        primary_key=True, default=new_id("wrn")
+    )  # warning_id of the signals
     situation_id: Mapped[str] = mapped_column(ForeignKey("situation.id"), index=True)
     area_id: Mapped[str] = mapped_column(ForeignKey("area.id"))
     cause: Mapped[str]  # e.g. "suspicious person", "unpermitted entry"
-    suspicion: Mapped[float]  # suspicion level of the situation summary it originates from
+    suspicion: Mapped[
+        float
+    ]  # suspicion level of the situation summary it originates from
     colour: Mapped[str]  # decided when sent: the orange threshold is lower at night
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     answer_deadline: Mapped[datetime | None]  # after this, the fallback policy applies
@@ -364,7 +401,9 @@ class SituationAlarm(Base):
     __tablename__ = "alarm"
     __table_args__ = (
         one_of("origin", "rule", "user_elevation", "fallback_policy"),
-        Index("ix_alarm_cause_area_time", "cause", "area_id", "created_at"),  # "similar alarm in the immediate past"
+        Index(
+            "ix_alarm_cause_area_time", "cause", "area_id", "created_at"
+        ),  # "similar alarm in the immediate past"
     )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=new_id("alm"))
@@ -372,7 +411,9 @@ class SituationAlarm(Base):
     area_id: Mapped[str] = mapped_column(ForeignKey("area.id"))
     cause: Mapped[str]  # e.g. "strong suspicion", "dangerous animal"
     origin: Mapped[str]
-    warning_id: Mapped[str | None] = mapped_column(ForeignKey("warning.id"))  # the warning that was elevated
+    warning_id: Mapped[str | None] = mapped_column(
+        ForeignKey("warning.id")
+    )  # the warning that was elevated
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     situation: Mapped[Situation] = relationship(back_populates="alarms")
@@ -387,7 +428,9 @@ class Notification(Base):
     __tablename__ = "notification"
     __table_args__ = (
         one_of("status", "sent", "failed"),
-        CheckConstraint("(warning_id IS NULL) <> (alarm_id IS NULL)"),  # exactly one of the two
+        CheckConstraint(
+            "(warning_id IS NULL) <> (alarm_id IS NULL)"
+        ),  # exactly one of the two
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -399,7 +442,9 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     contact: Mapped[Contact] = relationship(back_populates="notifications")
-    warning: Mapped[SituationWarning | None] = relationship(back_populates="notifications")
+    warning: Mapped[SituationWarning | None] = relationship(
+        back_populates="notifications"
+    )
     alarm: Mapped[SituationAlarm | None] = relationship(back_populates="notifications")
 
 
@@ -412,7 +457,9 @@ class IdempotencyKey(Base):
 
     key: Mapped[str] = mapped_column(primary_key=True)
     kind: Mapped[str]
-    result: Mapped[dict[str, Any]] = mapped_column(default=dict)  # returned instead of sending again
+    result: Mapped[dict[str, Any]] = mapped_column(
+        default=dict
+    )  # returned instead of sending again
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
@@ -423,8 +470,12 @@ class LogEntry(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
-    situation_id: Mapped[str | None] = mapped_column(ForeignKey("situation.id"), index=True)
-    kind: Mapped[str]  # e.g. "warning", "alarm", "situation_summary", "speak", "agent_failure"
+    situation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("situation.id"), index=True
+    )
+    kind: Mapped[
+        str
+    ]  # e.g. "warning", "alarm", "situation_summary", "speak", "agent_failure"
     message: Mapped[str] = mapped_column(Text)  # display only
     data: Mapped[dict[str, Any]] = mapped_column(default=dict)
 

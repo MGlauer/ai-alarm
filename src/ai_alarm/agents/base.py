@@ -12,6 +12,7 @@ that is the same for all agents:
 Subclasses declare their signal types and prompt, and may override `context` and `postprocess`.
 Timeouts, retries and the treatment of an invalid response as "no response" are the caller's job (the SI).
 """
+
 from __future__ import annotations
 
 import uuid
@@ -33,7 +34,9 @@ ENVELOPE_FIELDS = frozenset(SituationSignal.model_fields) | {"type"}
 class Model(Protocol):
     """The model backend (mock, Ollama, ...): system prompt, request content and response schema in, JSON out."""
 
-    def __call__(self, *, system: str, request: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]: ...
+    def __call__(
+        self, *, system: str, request: dict[str, Any], schema: dict[str, Any]
+    ) -> dict[str, Any]: ...
 
 
 class InvalidResponse(Exception):
@@ -60,11 +63,16 @@ class Agent(Generic[Req, Resp]):
         req = self.request_type.model_validate(request)
         answer = self.model(
             system=self.system_prompt,
-            request={**req.model_dump(mode="json", exclude=ENVELOPE_FIELDS), **self.context(req)},
+            request={
+                **req.model_dump(mode="json", exclude=ENVELOPE_FIELDS),
+                **self.context(req),
+            },
             schema=self.content_schema,
         )
         if not isinstance(answer, dict):
-            raise InvalidResponse(f"{self.name}: expected a JSON object, got {type(answer).__name__}")
+            raise InvalidResponse(
+                f"{self.name}: expected a JSON object, got {type(answer).__name__}"
+            )
         try:
             resp = self.response_type.model_validate({**answer, **self._envelope(req)})
         except ValidationError as e:
@@ -90,8 +98,12 @@ class Agent(Generic[Req, Resp]):
     def content_schema(self) -> dict[str, Any]:
         """JSON schema of the response without the envelope, i.e. only what the model has to produce."""
         schema = self.response_type.model_json_schema()
-        schema["properties"] = {k: v for k, v in schema["properties"].items() if k not in ENVELOPE_FIELDS}
-        schema["required"] = [k for k in schema.get("required", []) if k not in ENVELOPE_FIELDS]
+        schema["properties"] = {
+            k: v for k, v in schema["properties"].items() if k not in ENVELOPE_FIELDS
+        }
+        schema["required"] = [
+            k for k in schema.get("required", []) if k not in ENVELOPE_FIELDS
+        ]
         return schema
 
     def _envelope(self, request: Req) -> dict[str, Any]:

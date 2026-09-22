@@ -1,4 +1,5 @@
 """Person Identifier: matches a person in an image/video against the reference images of the knowledge base."""
+
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -11,7 +12,9 @@ from ai_alarm.signals import BBox, Media, Score, SituationSignal
 
 Verdict = Literal["known", "unknown", "not_decidable"]
 # "unavailable" is not in this list: only the SI sets it, when the agent does not answer.
-NotDecidableCause = Literal["clothing", "object on person", "external object", "low confidence", "unknown"]
+NotDecidableCause = Literal[
+    "clothing", "object on person", "external object", "low confidence", "unknown"
+]
 
 
 class PersonIdentifierRequest(SituationSignal):
@@ -31,14 +34,22 @@ class PersonIdentifierRequest(SituationSignal):
 class PersonIdentifierResponse(SituationSignal):
     type: Literal["identification"] = "identification"
     verdict: Verdict
-    person: str | None = None  # person id, only for "known"; name, roles etc. are looked up in the knowledge base
+    person: str | None = (
+        None  # person id, only for "known"; name, roles etc. are looked up in the knowledge base
+    )
     confidence: Score | None = None  # only for "known"
     cause: NotDecidableCause | None = None  # only for "not_decidable"
 
     @model_validator(mode="after")
     def _fields_match_verdict(self):
-        present = {k for k in ("person", "confidence", "cause") if getattr(self, k) is not None}
-        required = {"known": {"person", "confidence"}, "unknown": set(), "not_decidable": {"cause"}}[self.verdict]
+        present = {
+            k for k in ("person", "confidence", "cause") if getattr(self, k) is not None
+        }
+        required = {
+            "known": {"person", "confidence"},
+            "unknown": set(),
+            "not_decidable": {"cause"},
+        }[self.verdict]
         if present != required:
             raise ValueError(
                 f"verdict '{self.verdict}' needs exactly the fields {sorted(required)}, got {sorted(present)}"
@@ -62,7 +73,9 @@ Never guess a person id.
 
     def __init__(self, model: Model, kb: KnowledgeBase, threshold: float = 0.7):
         super().__init__(model, kb)
-        self.threshold = threshold  # a match below this confidence is reported as not decidable
+        self.threshold = (
+            threshold  # a match below this confidence is reported as not decidable
+        )
 
     def context(self, request: PersonIdentifierRequest) -> dict[str, Any]:
         return {"references": self.kb.reference_images()}
@@ -71,9 +84,16 @@ Never guess a person id.
         self, request: PersonIdentifierRequest, response: PersonIdentifierResponse
     ) -> PersonIdentifierResponse:
         if response.verdict == "known" and not self.kb.person_exists(response.person):
-            raise InvalidResponse(f"{self.name}: '{response.person}' is not a person in the knowledge base")
+            raise InvalidResponse(
+                f"{self.name}: '{response.person}' is not a person in the knowledge base"
+            )
         if response.verdict == "known" and response.confidence < self.threshold:
             return response.model_copy(
-                update={"verdict": "not_decidable", "person": None, "confidence": None, "cause": "low confidence"}
+                update={
+                    "verdict": "not_decidable",
+                    "person": None,
+                    "confidence": None,
+                    "cause": "low confidence",
+                }
             )
         return response

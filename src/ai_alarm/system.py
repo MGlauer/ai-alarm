@@ -1,5 +1,7 @@
 """The complete system, wired together with simulated sensors, speaker, text gateway and weather service, and
-scripted (mock) agent models. `System.play(demo)` lets the simulated processors report a demo's anomalies."""
+scripted (mock) agent models. `System.play(demo)` lets the simulated processors report a demo's anomalies.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -11,7 +13,11 @@ from typing import Callable, Mapping
 from flask import Flask
 
 from ai_alarm.agents import (
-    BehaviouralInterpreter, NoiseInterpreter, ObjectDetector, PersonIdentifier, WeatherInterpreter,
+    BehaviouralInterpreter,
+    NoiseInterpreter,
+    ObjectDetector,
+    PersonIdentifier,
+    WeatherInterpreter,
 )
 from ai_alarm.agents.mock import ScriptedModel
 from ai_alarm.api import create_app
@@ -29,16 +35,28 @@ from ai_alarm.workflow import SituationWorkflows, WorkflowConfig, make_checkpoin
 
 log = logging.getLogger(__name__)
 
-FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"  # served if the frontend is built
-ASSETS_DIR = Path(__file__).resolve().parents[2] / "media"  # sprites/layout/pre-rendered scenes, see sensors/processor.py
+FRONTEND_DIR = (
+    Path(__file__).resolve().parents[2] / "frontend" / "dist"
+)  # served if the frontend is built
+ASSETS_DIR = (
+    Path(__file__).resolve().parents[2] / "media"
+)  # sprites/layout/pre-rendered scenes, see sensors/processor.py
 
 
 class System:
     def __init__(
-        self, db_url: str = DEFAULT_URL, checkpoint_path: str = "data/checkpoints/checkpoints.db", *,
-        seed: bool = True, frontend_dir: Path | None = FRONTEND_DIR, assets_dir: Path = ASSETS_DIR,
-        demos: Mapping[str, Demo] = DEMOS, clock: Callable[[], datetime] = utcnow, tick_interval_s: float = 5,
-        controller_config: ControllerConfig = ControllerConfig(), workflow_config: WorkflowConfig = WorkflowConfig(),
+        self,
+        db_url: str = DEFAULT_URL,
+        checkpoint_path: str = "data/checkpoints/checkpoints.db",
+        *,
+        seed: bool = True,
+        frontend_dir: Path | None = FRONTEND_DIR,
+        assets_dir: Path = ASSETS_DIR,
+        demos: Mapping[str, Demo] = DEMOS,
+        clock: Callable[[], datetime] = utcnow,
+        tick_interval_s: float = 5,
+        controller_config: ControllerConfig = ControllerConfig(),
+        workflow_config: WorkflowConfig = WorkflowConfig(),
         comm_config: CommConfig = CommConfig(),
     ):
         self.engine = make_engine(db_url)
@@ -51,36 +69,68 @@ class System:
         self.kb = KnowledgeBase(self.session_factory)
 
         # simulated outside world
-        self.processor = CctvAudioProcessor(self.session_factory, dict(demos), clock=clock, assets_dir=assets_dir)
-        self.speaker, self.gateway = SimulatedSpeaker(clock), SimulatedTextGateway(clock)
+        self.processor = CctvAudioProcessor(
+            self.session_factory, dict(demos), clock=clock, assets_dir=assets_dir
+        )
+        self.speaker, self.gateway = SimulatedSpeaker(clock), SimulatedTextGateway(
+            clock
+        )
         self.forecast = WeatherForecastFetcher(
-            lambda: self.processor.demo.forecast(clock()) if self.processor.demo else [], clock)
+            lambda: (
+                self.processor.demo.forecast(clock()) if self.processor.demo else []
+            ),
+            clock,
+        )
 
         # the agents, with mock models that answer what the running demo says
         def agent(agent_class, name):
-            script = lambda: (self.processor.demo.answers if self.processor.demo else {}).get(name, {})  # noqa: E731
+            script = lambda: (
+                self.processor.demo.answers if self.processor.demo else {}
+            ).get(
+                name, {}
+            )  # noqa: E731
             return agent_class(ScriptedModel(script), self.kb)
 
         agents = {
             "object_detector": agent(ObjectDetector, "object_detector"),
             "person_identifier": agent(PersonIdentifier, "person_identifier"),
-            "behavioural_interpreter": agent(BehaviouralInterpreter, "behavioural_interpreter"),
+            "behavioural_interpreter": agent(
+                BehaviouralInterpreter, "behavioural_interpreter"
+            ),
             "noise_interpreter": agent(NoiseInterpreter, "noise_interpreter"),
             "weather_interpreter": agent(WeatherInterpreter, "weather_interpreter"),
         }
         self.checkpointer = make_checkpointer(checkpoint_path)
         self.workflows = SituationWorkflows(
-            session_factory=self.session_factory, kb=self.kb, forecast=self.forecast,
-            checkpointer=self.checkpointer, config=workflow_config, clock=clock, **agents)
+            session_factory=self.session_factory,
+            kb=self.kb,
+            forecast=self.forecast,
+            checkpointer=self.checkpointer,
+            config=workflow_config,
+            clock=clock,
+            **agents,
+        )
         self.controller = Controller(
-            session_factory=self.session_factory, kb=self.kb,
-            comm=CommunicationUnit(self.kb, self.gateway, comm_config), interpreters=self.workflows,
-            speaker=self.speaker, weather=self.forecast, audio=self.processor,
-            behavioural_interpreter=agents["behavioural_interpreter"], noise_interpreter=agents["noise_interpreter"],
-            config=controller_config, clock=clock)
+            session_factory=self.session_factory,
+            kb=self.kb,
+            comm=CommunicationUnit(self.kb, self.gateway, comm_config),
+            interpreters=self.workflows,
+            speaker=self.speaker,
+            weather=self.forecast,
+            audio=self.processor,
+            behavioural_interpreter=agents["behavioural_interpreter"],
+            noise_interpreter=agents["noise_interpreter"],
+            config=controller_config,
+            clock=clock,
+        )
         self.workflows.controller = self.controller
         self.app: Flask = create_app(
-            self.session_factory, self.controller, simulation=self, static_dir=frontend_dir, assets_dir=assets_dir)
+            self.session_factory,
+            self.controller,
+            simulation=self,
+            static_dir=frontend_dir,
+            assets_dir=assets_dir,
+        )
 
     def _seed_if_empty(self) -> None:
         with self.session_factory() as s:
@@ -114,7 +164,9 @@ class System:
     # ------------------------------------------------------------------ running
     def start(self) -> None:
         """Start the workflow worker and the timer that ticks the workflows and applies the fallback policy."""
-        threading.Thread(target=self.workflows.run_worker, name="workflows", daemon=True).start()
+        threading.Thread(
+            target=self.workflows.run_worker, name="workflows", daemon=True
+        ).start()
         threading.Thread(target=self._tick_loop, name="ticker", daemon=True).start()
 
     def stop(self) -> None:

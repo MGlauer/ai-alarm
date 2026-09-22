@@ -1,4 +1,5 @@
 """Behavioural Interpreter: predicts the intentions and interrelations of the persons in a sequence of frames."""
+
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -10,8 +11,15 @@ from ai_alarm.agents.person_identifier import Verdict
 from ai_alarm.signals import Media, Part, Score, SituationSignal
 
 Intent = Literal[
-    "delivery", "pickup", "ring_the_bell", "move_to_area", "invite_person", "accompany_person",
-    "health_emergency", "unknown_activity", "suspicious_activity",
+    "delivery",
+    "pickup",
+    "ring_the_bell",
+    "move_to_area",
+    "invite_person",
+    "accompany_person",
+    "health_emergency",
+    "unknown_activity",
+    "suspicious_activity",
 ]
 
 
@@ -37,7 +45,9 @@ class RankedIntent(Part):
 class IntentAssessment(Part):
     object_id: str
     intents: list[RankedIntent] = Field(min_length=1)  # most likely first
-    role_mismatch: Score  # degree of mismatch between the predicted intent and the person's role
+    role_mismatch: (
+        Score  # degree of mismatch between the predicted intent and the person's role
+    )
 
 
 class PersonRelation(Part):
@@ -53,7 +63,9 @@ class BehaviouralInterpreterResponse(SituationSignal):
     health_emergency: bool
 
 
-class BehaviouralInterpreter(Agent[BehaviouralInterpreterRequest, BehaviouralInterpreterResponse]):
+class BehaviouralInterpreter(
+    Agent[BehaviouralInterpreterRequest, BehaviouralInterpreterResponse]
+):
     name = "behavioural_interpreter"
     request_type = BehaviouralInterpreterRequest
     response_type = BehaviouralInterpreterResponse
@@ -72,15 +84,26 @@ entryway or the drop-off point for deliveries.
         return {"area": self.kb.area_info(request.area_id)}
 
     def postprocess(
-        self, request: BehaviouralInterpreterRequest, response: BehaviouralInterpreterResponse
+        self,
+        request: BehaviouralInterpreterRequest,
+        response: BehaviouralInterpreterResponse,
     ) -> BehaviouralInterpreterResponse:
         expected = sorted(p.object_id for p in request.persons)
         if sorted(p.object_id for p in response.persons) != expected:
-            raise InvalidResponse(f"{self.name}: expected exactly one entry for each of {expected}")
-        if any(r.subject not in expected or r.object not in expected for r in response.relations):
-            raise InvalidResponse(f"{self.name}: a relation refers to an unknown person")
+            raise InvalidResponse(
+                f"{self.name}: expected exactly one entry for each of {expected}"
+            )
+        if any(
+            r.subject not in expected or r.object not in expected
+            for r in response.relations
+        ):
+            raise InvalidResponse(
+                f"{self.name}: a relation refers to an unknown person"
+            )
         for p in response.persons:
             p.intents.sort(key=lambda i: i.confidence, reverse=True)
         if any(p.intents[0].intent == "health_emergency" for p in response.persons):
-            response.health_emergency = True  # never let the flag contradict the ranked intents
+            response.health_emergency = (
+                True  # never let the flag contradict the ranked intents
+            )
         return response

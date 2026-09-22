@@ -1,4 +1,5 @@
 """Signal envelope and value types shared by several signals."""
+
 from __future__ import annotations
 
 import uuid
@@ -7,8 +8,12 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-Score = Annotated[float, Field(ge=0, le=1)]  # 0..1; higher = more suspicious/dangerous or more certain (confidence)
-Media = Annotated[str, Field(min_length=1)]  # reference (path or URL) to an image, video or audio file
+Score = Annotated[
+    float, Field(ge=0, le=1)
+]  # 0..1; higher = more suspicious/dangerous or more certain (confidence)
+Media = Annotated[
+    str, Field(min_length=1)
+]  # reference (path or URL) to an image, video or audio file
 
 
 class SignalBase(BaseModel):

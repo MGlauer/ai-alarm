@@ -1,4 +1,5 @@
 """Speaker (Hardware) and the text message gateway, simulated: they log what they would do and remember it."""
+
 from __future__ import annotations
 
 import logging

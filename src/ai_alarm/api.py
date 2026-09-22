@@ -29,6 +29,7 @@ Rows are returned as they are stored (column names as keys, timestamps as ISO 86
 `{"error": "..."}`. There is no authentication (out of the scope of the challenge). If the frontend is built
 (`static_dir`), it is served at `/`.
 """
+
 from __future__ import annotations
 
 import json
@@ -45,7 +46,15 @@ from werkzeug.exceptions import HTTPException
 
 from ai_alarm.controller import Controller, SensorEventSignal, SituationResolvedSignal
 from ai_alarm.db.models import (
-    Area, LogEntry, Person, Scenario, Sensor, SensorEvent, Situation, SituationAlarm, SituationWarning,
+    Area,
+    LogEntry,
+    Person,
+    Scenario,
+    Sensor,
+    SensorEvent,
+    Situation,
+    SituationAlarm,
+    SituationWarning,
 )
 from ai_alarm.media import sprite_for_person
 
@@ -61,12 +70,21 @@ class Simulation(Protocol):
         """Raises `LookupError` for an unknown demo."""
 
     def frame(
-        self, *, evidence: str, kind: str, sensor_id: str, area_id: str, area_name: str, at: datetime
+        self,
+        *,
+        evidence: str,
+        kind: str,
+        sensor_id: str,
+        area_id: str,
+        area_name: str,
+        at: datetime,
     ) -> tuple[bytes, str]:
         """An image for a piece of sensor evidence, and its mimetype (a still PNG, or an animated GIF for evidence
         a pre-rendered situation exists for)."""
 
-    def idle_frame(self, *, sensor_id: str, kind: str, area_id: str, area_name: str, at: datetime) -> tuple[bytes, str]:
+    def idle_frame(
+        self, *, sensor_id: str, kind: str, area_id: str, area_name: str, at: datetime
+    ) -> tuple[bytes, str]:
         """An image of what a sensor sees when it has not reported anything, and its mimetype."""
 
     def audio(self, *, evidence: str) -> bytes:
@@ -79,18 +97,29 @@ class Simulation(Protocol):
 def _dict(row) -> dict[str, Any]:
     """A row as a JSON-able dict: its columns, with timestamps as ISO 8601 strings."""
     values = {c.name: getattr(row, c.name) for c in row.__table__.columns}
-    return {k: v.isoformat() if isinstance(v, datetime) else v for k, v in values.items()}
+    return {
+        k: v.isoformat() if isinstance(v, datetime) else v for k, v in values.items()
+    }
 
 
 def create_app(
-    session_factory: Callable[[], Session], controller: Controller, simulation: Simulation | None = None,
-    static_dir: Path | None = None, assets_dir: Path = Path("media"),
+    session_factory: Callable[[], Session],
+    controller: Controller,
+    simulation: Simulation | None = None,
+    static_dir: Path | None = None,
+    assets_dir: Path = Path("media"),
 ) -> Flask:
     # relative to the current working directory -- not to this package's own directory, which is what
     # Flask's send_from_directory would otherwise resolve a relative `directory` against
     assets_dir = assets_dir.resolve()
-    frontend = static_dir if static_dir is not None and (static_dir / "index.html").exists() else None
-    app = Flask(__name__, static_folder=str(frontend) if frontend else None, static_url_path="")
+    frontend = (
+        static_dir
+        if static_dir is not None and (static_dir / "index.html").exists()
+        else None
+    )
+    app = Flask(
+        __name__, static_folder=str(frontend) if frontend else None, static_url_path=""
+    )
 
     def get_or_404(s: Session, model, row_id: str):
         row = s.get(model, row_id)
@@ -103,30 +132,39 @@ def create_app(
     def scenarios():
         with session_factory() as s:
             rows = s.scalars(select(Scenario).order_by(Scenario.created_at.desc()))
-            return jsonify([{**_dict(x), "situation_ids": [y.id for y in x.situations]} for x in rows])
+            return jsonify(
+                [
+                    {**_dict(x), "situation_ids": [y.id for y in x.situations]}
+                    for x in rows
+                ]
+            )
 
     @app.get("/api/scenarios/<scenario_id>")
     def scenario(scenario_id: str):
         with session_factory() as s:
             x = get_or_404(s, Scenario, scenario_id)
-            return jsonify({
-                **_dict(x),
-                "situations": [_dict(y) for y in x.situations],
-                "aggregated_summaries": [_dict(y) for y in x.aggregated_summaries],
-            })
+            return jsonify(
+                {
+                    **_dict(x),
+                    "situations": [_dict(y) for y in x.situations],
+                    "aggregated_summaries": [_dict(y) for y in x.aggregated_summaries],
+                }
+            )
 
     @app.get("/api/situations/<situation_id>")
     def situation(situation_id: str):
         with session_factory() as s:
             x = get_or_404(s, Situation, situation_id)
-            return jsonify({
-                **_dict(x),
-                "events": [_dict(y) for y in x.events],
-                "summaries": [_dict(y) for y in x.summaries],
-                "warnings": [_dict(y) for y in x.warnings],
-                "alarms": [_dict(y) for y in x.alarms],
-                "log_entries": [_dict(y) for y in x.log_entries],
-            })
+            return jsonify(
+                {
+                    **_dict(x),
+                    "events": [_dict(y) for y in x.events],
+                    "summaries": [_dict(y) for y in x.summaries],
+                    "warnings": [_dict(y) for y in x.warnings],
+                    "alarms": [_dict(y) for y in x.alarms],
+                    "log_entries": [_dict(y) for y in x.log_entries],
+                }
+            )
 
     # ------------------------------------------------------------------ warnings and alarms
     @app.get("/api/warnings")
@@ -138,7 +176,9 @@ def create_app(
             return jsonify([_dict(x) for x in s.scalars(query)])
 
     def answer(warning_id: str, action: Callable[[str], None]):
-        action(warning_id)  # raises LookupError for an unknown warning; answering twice changes nothing
+        action(
+            warning_id
+        )  # raises LookupError for an unknown warning; answering twice changes nothing
         with session_factory() as s:
             return jsonify(_dict(get_or_404(s, SituationWarning, warning_id)))
 
@@ -153,13 +193,17 @@ def create_app(
     @app.get("/api/alarms")
     def alarms():
         with session_factory() as s:
-            rows = s.scalars(select(SituationAlarm).order_by(SituationAlarm.created_at.desc()))
+            rows = s.scalars(
+                select(SituationAlarm).order_by(SituationAlarm.created_at.desc())
+            )
             return jsonify([_dict(x) for x in rows])
 
     # ------------------------------------------------------------------ log and sensors
     @app.get("/api/log")
     def log():
-        query = select(LogEntry).order_by(LogEntry.created_at.desc(), LogEntry.id.desc())
+        query = select(LogEntry).order_by(
+            LogEntry.created_at.desc(), LogEntry.id.desc()
+        )
         if "situation_id" in request.args:
             query = query.where(LogEntry.situation_id == request.args["situation_id"])
         with session_factory() as s:
@@ -171,18 +215,31 @@ def create_app(
         with session_factory() as s:
             result = []
             for sensor in s.scalars(select(Sensor).order_by(Sensor.id)):
-                latest = s.scalars(select(SensorEvent).where(SensorEvent.sensor_id == sensor.id).order_by(
-                    SensorEvent.start_time.desc())).first()
-                result.append({**_dict(sensor), "latest_event": _dict(latest) if latest else None})
+                latest = s.scalars(
+                    select(SensorEvent)
+                    .where(SensorEvent.sensor_id == sensor.id)
+                    .order_by(SensorEvent.start_time.desc())
+                ).first()
+                result.append(
+                    {**_dict(sensor), "latest_event": _dict(latest) if latest else None}
+                )
             return jsonify(result)
 
     @app.get("/api/areas")
     def areas():
         with session_factory() as s:
-            return jsonify([
-                {**_dict(a), "people": [p.name or "Unknown person" for p in controller.kb.people_present(a.id)]}
-                for a in s.scalars(select(Area).order_by(Area.name))
-            ])
+            return jsonify(
+                [
+                    {
+                        **_dict(a),
+                        "people": [
+                            p.name or "Unknown person"
+                            for p in controller.kb.people_present(a.id)
+                        ],
+                    }
+                    for a in s.scalars(select(Area).order_by(Area.name))
+                ]
+            )
 
     @app.get("/api/persons")
     def persons():
@@ -192,7 +249,13 @@ def create_app(
             for x in rows:
                 role_names = [r.name for r in x.roles]
                 sprite = sprite_for_person(x.id, role_names)
-                result.append({**_dict(x), "roles": role_names, "picture_url": f"/api/media/sprites/{sprite}.png"})
+                result.append(
+                    {
+                        **_dict(x),
+                        "roles": role_names,
+                        "picture_url": f"/api/media/sprites/{sprite}.png",
+                    }
+                )
             return jsonify(result)
 
     @app.get("/api/media/sprites/<path:filename>")
@@ -208,9 +271,15 @@ def create_app(
         return jsonify(situation_id=controller.handle_sensor_event(signal)), 201
 
     if simulation is not None:
+
         @app.get("/api/demos")
         def demos():
-            return jsonify([{"name": name, "description": text} for name, text in simulation.demos.items()])
+            return jsonify(
+                [
+                    {"name": name, "description": text}
+                    for name, text in simulation.demos.items()
+                ]
+            )
 
         @app.post("/api/demos/<name>")
         def play_demo(name: str):
@@ -220,9 +289,13 @@ def create_app(
             # every active situation first, so its sensors fall back to their idle view (see sensor_frame) instead
             # of getting stuck showing the old scenario's evidence forever
             with session_factory() as s:
-                active_situation_ids = list(s.scalars(select(Situation.id).where(Situation.status == "active")))
+                active_situation_ids = list(
+                    s.scalars(select(Situation.id).where(Situation.status == "active"))
+                )
             for situation_id in active_situation_ids:
-                controller.handle_situation_resolved(SituationResolvedSignal(situation_id=situation_id))
+                controller.handle_situation_resolved(
+                    SituationResolvedSignal(situation_id=situation_id)
+                )
             simulation.play(name)
             return jsonify(demo=name), 202
 
@@ -233,17 +306,29 @@ def create_app(
                 sensor = s.get(Sensor, event.sensor_id)
                 area = s.get(Area, sensor.area_id) if sensor else None
             data, mimetype = simulation.frame(
-                evidence=event.evidence, kind=event.kind, sensor_id=event.sensor_id,
-                area_id=area.id if area else "", area_name=area.name if area else event.sensor_id,
-                at=event.start_time)
-            return Response(data, mimetype=mimetype, headers={"Cache-Control": "public, max-age=300"})
+                evidence=event.evidence,
+                kind=event.kind,
+                sensor_id=event.sensor_id,
+                area_id=area.id if area else "",
+                area_name=area.name if area else event.sensor_id,
+                at=event.start_time,
+            )
+            return Response(
+                data,
+                mimetype=mimetype,
+                headers={"Cache-Control": "public, max-age=300"},
+            )
 
         @app.get("/api/media/<event_id>/audio")
         def media_audio(event_id: str):
             with session_factory() as s:
                 event = get_or_404(s, SensorEvent, event_id)
             wav = simulation.audio(evidence=event.evidence)
-            return Response(wav, mimetype="audio/wav", headers={"Cache-Control": "public, max-age=300"})
+            return Response(
+                wav,
+                mimetype="audio/wav",
+                headers={"Cache-Control": "public, max-age=300"},
+            )
 
         @app.get("/api/sensors/<sensor_id>/frame")
         def sensor_frame(sensor_id: str):
@@ -254,17 +339,36 @@ def create_app(
             with session_factory() as s:
                 sensor = get_or_404(s, Sensor, sensor_id)
                 area = s.get(Area, sensor.area_id)
-                latest = s.scalars(select(SensorEvent).join(Situation).where(
-                    SensorEvent.sensor_id == sensor_id, Situation.status == "active",
-                ).order_by(SensorEvent.start_time.desc())).first()
+                latest = s.scalars(
+                    select(SensorEvent)
+                    .join(Situation)
+                    .where(
+                        SensorEvent.sensor_id == sensor_id,
+                        Situation.status == "active",
+                    )
+                    .order_by(SensorEvent.start_time.desc())
+                ).first()
             area_id, area_name = (area.id, area.name) if area else ("", sensor.id)
             if latest is not None:
-                data, mimetype = simulation.frame(evidence=latest.evidence, kind=latest.kind, sensor_id=sensor.id,
-                                                  area_id=area_id, area_name=area_name, at=latest.start_time)
+                data, mimetype = simulation.frame(
+                    evidence=latest.evidence,
+                    kind=latest.kind,
+                    sensor_id=sensor.id,
+                    area_id=area_id,
+                    area_name=area_name,
+                    at=latest.start_time,
+                )
             else:
-                data, mimetype = simulation.idle_frame(sensor_id=sensor.id, kind=sensor.kind, area_id=area_id,
-                                                        area_name=area_name, at=controller.clock())
-            return Response(data, mimetype=mimetype, headers={"Cache-Control": "public, max-age=5"})
+                data, mimetype = simulation.idle_frame(
+                    sensor_id=sensor.id,
+                    kind=sensor.kind,
+                    area_id=area_id,
+                    area_name=area_name,
+                    at=controller.clock(),
+                )
+            return Response(
+                data, mimetype=mimetype, headers={"Cache-Control": "public, max-age=5"}
+            )
 
         @app.get("/api/sensors/<sensor_id>/audio")
         def sensor_audio(sensor_id: str):
@@ -273,14 +377,29 @@ def create_app(
             [sensor] can be streamed on-demand"."""
             with session_factory() as s:
                 sensor = get_or_404(s, Sensor, sensor_id)
-                latest = s.scalars(select(SensorEvent).join(Situation).where(
-                    SensorEvent.sensor_id == sensor_id, SensorEvent.kind == "audio", Situation.status == "active",
-                ).order_by(SensorEvent.start_time.desc())).first()
-            wav = simulation.audio(evidence=latest.evidence) if latest else simulation.idle_audio(
-                sensor_id=sensor.id)
-            return Response(wav, mimetype="audio/wav", headers={"Cache-Control": "public, max-age=5"})
+                latest = s.scalars(
+                    select(SensorEvent)
+                    .join(Situation)
+                    .where(
+                        SensorEvent.sensor_id == sensor_id,
+                        SensorEvent.kind == "audio",
+                        Situation.status == "active",
+                    )
+                    .order_by(SensorEvent.start_time.desc())
+                ).first()
+            wav = (
+                simulation.audio(evidence=latest.evidence)
+                if latest
+                else simulation.idle_audio(sensor_id=sensor.id)
+            )
+            return Response(
+                wav,
+                mimetype="audio/wav",
+                headers={"Cache-Control": "public, max-age=5"},
+            )
 
     if frontend is not None:
+
         @app.get("/")
         def index():
             # Vite fingerprints every JS/CSS file with a content hash and deletes the previous build's files on
@@ -307,6 +426,9 @@ def create_app(
 
     @app.errorhandler(IntegrityError)
     def unknown_reference(e: IntegrityError):
-        return jsonify(error="the event refers to a sensor or area that does not exist"), 400
+        return (
+            jsonify(error="the event refers to a sensor or area that does not exist"),
+            400,
+        )
 
     return app

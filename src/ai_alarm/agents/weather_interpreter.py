@@ -1,4 +1,5 @@
 """Weather Interpreter: describes the weather conditions visible/audible in a video or audio clip."""
+
 from __future__ import annotations
 
 from typing import Literal
@@ -8,7 +9,9 @@ from pydantic import Field, model_validator
 from ai_alarm.agents.base import Agent
 from ai_alarm.signals import Media, Part, Score, SituationSignal
 
-WeatherCondition = Literal["high_wind", "snowfall", "fog", "rain", "cloudy", "sunny", "unknown"]
+WeatherCondition = Literal[
+    "high_wind", "snowfall", "fog", "rain", "cloudy", "sunny", "unknown"
+]
 
 
 class WeatherInterpreterRequest(SituationSignal):
@@ -20,7 +23,9 @@ class WeatherInterpreterRequest(SituationSignal):
 class ObservedCondition(Part):
     condition: WeatherCondition
     confidence: Score
-    wind_speed_kmh: float | None = Field(default=None, ge=0)  # approximate, only for high wind
+    wind_speed_kmh: float | None = Field(
+        default=None, ge=0
+    )  # approximate, only for high wind
 
     @model_validator(mode="after")
     def _wind_speed_only_for_high_wind(self):

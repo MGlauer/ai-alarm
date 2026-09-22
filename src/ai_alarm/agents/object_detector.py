@@ -1,4 +1,5 @@
 """Object Detector: detects and classifies the objects of an anomaly in a video/image."""
+
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -8,7 +9,9 @@ from pydantic import model_validator
 from ai_alarm.agents.base import Agent, InvalidResponse
 from ai_alarm.signals import BBox, Media, Part, Score, SituationSignal
 
-AnomalyClass = Literal["person", "animal", "weather_environment", "sensor_artefact", "unclear"]
+AnomalyClass = Literal[
+    "person", "animal", "weather_environment", "sensor_artefact", "unclear"
+]
 
 
 class ObjectDetectorRequest(SituationSignal):
@@ -19,7 +22,9 @@ class ObjectDetectorRequest(SituationSignal):
 
 
 class DetectedObject(Part):
-    object_id: str  # unique within the response; other signals refer to the object by this id
+    object_id: (
+        str  # unique within the response; other signals refer to the object by this id
+    )
     kind: Literal["person", "animal", "object"]
     label: str  # e.g. "woman", "bear", "crowbar"
     confidence: Score
@@ -29,7 +34,9 @@ class DetectedObject(Part):
 
     @model_validator(mode="after")
     def _role_only_for_persons(self):
-        if self.kind != "person" and (self.role is not None or self.role_confidence is not None):
+        if self.kind != "person" and (
+            self.role is not None or self.role_confidence is not None
+        ):
             raise ValueError("role and role_confidence are only allowed for persons")
         if self.role is None and self.role_confidence is not None:
             raise ValueError("role_confidence requires a role")
@@ -69,17 +76,30 @@ your own words.
     def context(self, request: ObjectDetectorRequest) -> dict[str, Any]:
         return {"known_roles": self.kb.role_names()}
 
-    def postprocess(self, request: ObjectDetectorRequest, response: ObjectDetectorResponse) -> ObjectDetectorResponse:
+    def postprocess(
+        self, request: ObjectDetectorRequest, response: ObjectDetectorResponse
+    ) -> ObjectDetectorResponse:
         ids = [o.object_id for o in response.objects]
         kinds = {o.kind for o in response.objects}
         if len(set(ids)) != len(ids):
             raise InvalidResponse(f"{self.name}: object ids are not unique")
         if response.sensor_artefact != (response.anomaly_class == "sensor_artefact"):
-            raise InvalidResponse(f"{self.name}: sensor_artefact contradicts anomaly_class")
+            raise InvalidResponse(
+                f"{self.name}: sensor_artefact contradicts anomaly_class"
+            )
         if response.anomaly_class == "sensor_artefact" and response.objects:
-            raise InvalidResponse(f"{self.name}: a sensor artefact must not contain objects")
-        if response.anomaly_class in ("person", "animal") and response.anomaly_class not in kinds:
-            raise InvalidResponse(f"{self.name}: anomaly_class '{response.anomaly_class}' but no such object")
+            raise InvalidResponse(
+                f"{self.name}: a sensor artefact must not contain objects"
+            )
+        if (
+            response.anomaly_class in ("person", "animal")
+            and response.anomaly_class not in kinds
+        ):
+            raise InvalidResponse(
+                f"{self.name}: anomaly_class '{response.anomaly_class}' but no such object"
+            )
         if any(r.subject not in ids or r.object not in ids for r in response.relations):
-            raise InvalidResponse(f"{self.name}: a relation refers to an unknown object")
+            raise InvalidResponse(
+                f"{self.name}: a relation refers to an unknown object"
+            )
         return response

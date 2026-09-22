@@ -1,4 +1,5 @@
 """Noise Interpreter: classifies an audio clip."""
+
 from __future__ import annotations
 
 from typing import Literal
@@ -6,7 +7,9 @@ from typing import Literal
 from ai_alarm.agents.base import Agent, InvalidResponse
 from ai_alarm.signals import Media, Score, SituationSignal
 
-NoiseCategory = Literal["human_activity", "animal", "weather", "technical_noise", "unknown"]
+NoiseCategory = Literal[
+    "human_activity", "animal", "weather", "technical_noise", "unknown"
+]
 
 
 class NoiseInterpreterRequest(SituationSignal):
@@ -36,5 +39,7 @@ sound is caused by the sensor itself (then the category is technical_noise).
         self, request: NoiseInterpreterRequest, response: NoiseInterpreterResponse
     ) -> NoiseInterpreterResponse:
         if response.is_sensor_artefact and response.category != "technical_noise":
-            raise InvalidResponse(f"{self.name}: a sensor artefact must have the category technical_noise")
+            raise InvalidResponse(
+                f"{self.name}: a sensor artefact must have the category technical_noise"
+            )
         return response
