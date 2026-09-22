@@ -1,7 +1,6 @@
 # AI Alarm System
 
-A prototype AI-driven home security system built for a take-home challenge. The full component/signal spec lives in
-[`DESIGN_DOCUMENT.md`](DESIGN_DOCUMENT.md).
+A prototype AI-driven home security system built for a take-home challenge.
 
 ## Architecture
 
@@ -18,27 +17,23 @@ sensors (simulated)
         -> Communication Unit + log
             -> Human 
                 -> Can elevate/dismiss warnings
+        -> Speaker 
+            -> Warns on unpermitted entry
 ```
 
-Only the Controller's fixed rules (suspicion/danger thresholds, permission checks) can raise a warning or alarm —
-no agent output or free text ever does directly.
+Only the Controller's fixed rules (suspicion/danger thresholds, permission checks) can raise a warning or alarm never an agent output or free text.
 
 ## Frameworks and their roles
 
 - **LangGraph** (`workflow.py`) implements the Situation Interpreter as a typed `StateGraph`
   (`intake -> detect -> {people, animals, weather} -> merge -> report -> observe`, looping back to `intake` or on
   to `resolve`). It owns state transitions, the parallel fan-out to agents, and checkpointing.
-- **Pydantic** (`signals.py`) defines every inter-component message as a schema-validated model — the contract
-  agents must answer against.
+- **Pydantic** (`signals.py`) defines every inter-component message as a schema-validated model
 - **Flask** (`api.py`) is a thin HTTP layer with no business logic; every route reads the DB or delegates to the
   Controller/System.
-- **SQLAlchemy + SQLite** (`db/models.py`) is the knowledge base and event/situation/warning/alarm log — SQLite is
-  a challenge-scope choice, not a production one.
-- The Controller itself is plain deterministic Python, deliberately *not* a graph: it only ever *triggers* an
-  agent, never reasons itself.
+- **SQLAlchemy + SQLite** (`db/models.py`) is the knowledge base and event/situation/warning/alarm log
 
 ## Quickstart
-
 
 ** Run the backend **
 ```bash
@@ -52,19 +47,18 @@ python scripts/run_server.py            # API at :5000/api, serves frontend/dist
 cd frontend && npm install && npm run build
 ```
 
-The frontend featurs several example scenarios. You may run them by choosing one in the "Simulation" tab.
+The frontend features several example scenarios. You may run them by choosing one in the "Simulation" tab.
 
 ## Human-in-the-loop (HITL)
 
-HITL **is** implemented, via a warning that pauses the workflow (a LangGraph interrupt) until a human answers:
+HITL is implemented, via a warning that pauses the workflow (a LangGraph interrupt) until a human answers:
 
 - A warning is colour-coded **yellow** or **orange** by suspicion (orange above 0.75, lowered to **0.5 at night**). The user elevates (`{elevate}`) or dismisses (`{dismiss}`) it in the
   frontend.
-- **Fallback policy:** if a warning goes unanswered for `answer_timeout_s` seconds or nobody could be
-  reached, it resolves automatically — yellow is dismissed, orange is elevated to an alarm — flagged as
-  `fallback_policy`-caused. During the night, this threshold is lowered, meaning that more situations may trigger an alarm.
+- **Fallback policy:** if a warning goes unanswered within a fixed time frame or nobody could be
+  reached, it resolves automatically — yellow is dismissed, orange is elevated to an alarm. During the night, this threshold is lowered, meaning that more situations may trigger an alarm.
   This is done to account for the higher chance of missed notifications during the night.
-- An alarm caused by strong suspicion (score > 0.85) or a top-danger animal bypasses HITL entirely and fires directly —
+- An alarm caused by strong suspicion (score > 0.85) or a top-danger animal (e.g. a bear) bypasses HITL entirely and fires directly —
   those cases don't benefit from waiting on a human.
 
 ## Checkpointing, error handling, idempotency
@@ -85,8 +79,7 @@ HITL **is** implemented, via a warning that pauses the workflow (a LangGraph int
 - **AI-based (agents):** object detector, person identifier, behavioural/noise/weather interpreter — stateless,
   answer only in a validated structured schema, never call each other or trigger side effects directly.
 - **Deterministic:** the Controller (thresholds, permission checks, idempotency, alarm/warning decisions), the
-  Communication Unit (colour/night logic, fallback policy), and the LangGraph state machine itself (routing, not
-  the content of the analysis).
+  Communication Unit (warning colour/night logic, fallback policy).
 - **Human:** can elevate/dismiss a warning.
 
 ## AI tools used
