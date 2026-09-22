@@ -161,16 +161,17 @@ This component is a central controller. The controller merely has an executive f
 
 An {alarm} signal is triggered if the aggregated situation summary indicates a high suspicion level. Alarms are only ever triggered by the controller through the deterministic rules described here, by a user elevating a warning, or by the fallback policy for an unanswered orange warning (see below); no agent output, in particular no free text, can trigger an alarm directly.
 
-The controller collates all information from all active Situation interpreters, calculates a combined suspicion score for each detected person. If a person exceeds a pre-configured warning threshold of suspicion (suggested default: 0.4), the controller triggers a {warning cause="suspicious person"} signal. If a person exceeds another, higher pre-configured threshold of suspicion (suggested default: 0.85), the controller triggers an {alarm cause="strong suspicion"} signal. These two thresholds are independent of the colour thresholds of the communication unit below. The Controller also compares the area in which a person is detected with the areas in which the person is allowed to enter. If the person is not allowed to enter the area in question, the controller triggers a {warning cause="unpermitted entry"} signal to the log and a {speak text="You are entering without permission. Please leave the area immediately."} signal is sent. If the entry is prolonged, it will issue an {alarm cause="unpermitted entry"} signal. Every warning carries the suspicion level of the situation summary it originates from.
+The controller collates all information from all active Situation interpreters, calculates a combined suspicion score for each detected person. If a person exceeds a pre-configured warning threshold of suspicion (suggested default: 0.4), the controller triggers a {warning cause="suspicious person"} signal. If a person exceeds another, higher pre-configured threshold of suspicion (suggested default: 0.85), the controller triggers an {alarm cause="strong suspicion"} signal instead. These two thresholds are independent of the colour thresholds of the communication unit below. The Controller also compares the area in which a person is detected with the areas in which the person is allowed to enter. If the person is not allowed to enter the area in question *and* their suspicion has not already reached the alarm threshold above, the controller triggers a {warning cause="unpermitted entry"} signal to the log and a {speak text="You are entering without permission. Please leave the area immediately."} signal is sent; if the entry is prolonged, it will issue an {alarm cause="unpermitted entry"} signal. (A person already alarmed for strong suspicion is not also given this warning: a warning asks for a human decision that an already-triggered alarm has made moot.) Every warning carries the suspicion level of the situation summary it originates from.
 
 Finally, the controller stores the data of all detected people in the knowledge base, alongside their roles and suspicion scores, unless the person was marked as unidentifiable (*not decidable*, except for the cause "low confidence").
 
 If a high-danger animal (e.g. a bear) is detected by some SI, an {alarm cause="dangerous animal"} should be triggered under any of the following conditions:
+  * The animal's own danger score is already at the top of the scale (0.95, e.g. a bear) -- too dangerous to leave as a warning regardless of the context below.
   * There is an open entry point to the house.
   * (Optional; default: False) One or more people are within the surveilled area.
   * (Optional; default: False) The event occurs within a specific time frame.
 
-If none of these three conditions is met, a {warning cause="dangerous animal"} is sent instead.
+If none of these conditions is met, a {warning cause="dangerous animal"} is sent instead.
 
 If an SI sends the {obscured} signal, the controller queries the weather forecast fetcher for the weather forecast. The results are then evaluated to determine whether the obstruction is plausible (e.g. by heavy fog, snow, rain or an eclipse). It also passes the video data to the behavioural interpreter to check whether the obstruction is plausibly caused by human activity of a person flagged as *unsuspicious* or within the scope of their role (e.g. the gardener blocking the view of a camera while trimming the hedges). If the obstruction is not plausible and the obstruction is prolonged, the controller triggers a {warning cause="vision obstructed"} signal. The controller then also queries the respective audio processor for the audio data and passes the results to the noise interpreter. If the interpretation indicates human activity and no family member is in the area in question, the controller triggers an {alarm cause="obstruction by human activity"} signal.
 
@@ -215,6 +216,15 @@ Each kind of alarm and warning has a pre-defined template for outside communicat
 ## Interface
 
 The system provides a web interface for users to interact with the alarm system. Users can access the current output of all sensors, the log of all past events, and all past situations as well as their summary and related data. Visual data should be combined with the annotations and shown next to the corresponding bounding boxes.
+
+The interface consists of several pages:
+* The home page shows the current video streams of each camera. The audio of each can be streamed on-demand.
+* The "history" page shows all past situations.
+  * Each situation can be unfolded to show the stored footage of the surveilled area, with annotated bounding boxes and the corresponding situation summary.
+* A "Simulation" page that allows the user to simulate one of the pre-defined scenarios. In this case, the backend should simulate all signals as if the system was runnging. Starting a new scenario resolves whatever is currently playing and takes over immediately, rather than being blocked by it.
+* A "Person" page that allows the user to view all people currently in the database and their roles and pictures. NO edit functionality is needed.
+
+Upon receiving a warning or an alarm, the user should be notified and the view should switch to a page showing the situation. The user can then choose to dismiss the warning or to elevate it to an alarm.
 
 ## Scope
 
