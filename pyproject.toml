@@ -1,0 +1,27 @@
+[project]
+name = "ai-alarm"
+version = "0.1.0"
+description = "Prototype AI-driven security/alarm system"
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.0",
+    "pydantic>=2.6",
+    "sqlalchemy>=2.0",
+    "langgraph>=0.2.60",
+    "langgraph-checkpoint-sqlite>=2.0",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
