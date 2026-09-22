@@ -118,8 +118,8 @@ class World:
 
     def summary(self, sid, area="garden", score=0.1, persons=(), **kw):
         self.controller.handle_situation_summary(SituationSummarySignal(
-            situation_id=sid, area_id=area, summary=kw.pop("text", "something"), threat_score=score,
-            persons=list(persons), **kw))
+            situation_id=sid, area_id=area, event_id=kw.pop("event_id", "evt_test"),
+            summary=kw.pop("text", "something"), threat_score=score, persons=list(persons), **kw))
 
     def obscured(self, sid, area="garden", persons=()):
         self.controller.handle_obscured(ObscuredSignal(
