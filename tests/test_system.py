@@ -100,8 +100,8 @@ def scripted(name: str, sensor: str = "cam_garden", **answers) -> tuple[Demo, st
     ("gardener", [], [], 0.0),  # plausible person
     ("delivery", [], [], 0.05),  # plausible person, unknown but allowed at the entryway
     ("hooded_person", ["suspicious person", "unpermitted entry"], [], 0.6),  # unclear: a human decides
-    ("intruder", ["unpermitted entry"], ["strong suspicion"], 0.9),  # critical
-    ("bear", ["dangerous animal"], [], 1.0),  # critical: the house is closed, so a warning
+    ("intruder", [], ["strong suspicion"], 0.9),  # critical: already alarmed, so no redundant entry warning too
+    ("bear", [], ["dangerous animal"], 1.0),  # critical: maximum danger always alarms, house closed or not
 ])
 def test_demo_outcome(sim, name, warnings, alarms, threat):
     sim.play(name)
@@ -126,7 +126,8 @@ def test_the_demo_house_is_seeded_once(make_sim, tmp_path):
 
 # ------------------------------------------------------------------ events and the graph
 def test_every_event_is_interpreted_so_an_alarm_is_not_masked(sim):
-    # An intruder in the garden (an alarm, and a warning that waits for the user) and a harmless second clip.
+    # An intruder in the garden (an alarm; already too suspicious for a redundant entry warning too) and a
+    # harmless second clip.
     demo, first = scripted("burglar", "cam_garden", object_detector=_detected("person", _person()),
                            person_identifier={"verdict": "unknown"},
                            behavioural_interpreter=_behaviour(("suspicious_activity", 0.9), role_mismatch=0.9))
@@ -136,7 +137,7 @@ def test_every_event_is_interpreted_so_an_alarm_is_not_masked(sim):
     sim.play(demo)
     # Both events have the same time here, so which is first does not matter: each one is interpreted.
     assert sorted(s["threat_score"] for s in sim.summaries()) == [0.0, 0.9]
-    assert sim.alarm_causes() == ["strong suspicion"] and sim.warning_causes() == ["unpermitted entry"]
+    assert sim.alarm_causes() == ["strong suspicion"] and sim.warning_causes() == []
 
 
 def test_state_is_checkpointed_and_the_situation_observes(sim):
@@ -336,15 +337,15 @@ def test_a_crashed_run_continues_from_its_checkpoint_after_a_restart(make_sim):
     second.tick()
     assert len(second.summaries()) == 1 and second.alarm_causes() == ["strong suspicion"]
     assert second.state().next == () and second.state().values["phase"] == "observe"
-    assert second.warning_causes() == ["unpermitted entry"]
+    assert second.warning_causes() == []  # already alarmed, so no redundant entry warning too
 
 
 def test_repeating_a_report_does_not_repeat_warnings_and_alarms(sim):
     sim.play("intruder")
     again = SituationSummarySignal.model_validate({**sim.summaries()[0], "situation_id": sim.situation()})
     sim.controller.handle_situation_summary(again)
-    assert sim.alarm_causes() == ["strong suspicion"] and sim.warning_causes() == ["unpermitted entry"]
-    assert len(sim.system.gateway.sent) == 2
+    assert sim.alarm_causes() == ["strong suspicion"] and sim.warning_causes() == []
+    assert len(sim.system.gateway.sent) == 1
 
 
 # ------------------------------------------------------------------ helpers

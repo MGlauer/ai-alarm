@@ -310,7 +310,13 @@ def test_detected_persons_are_stored_with_suspicion_and_role(world, session_fact
 
 
 # ------------------------------------------------------------------ dangerous animals
-BEAR, BOAR = AnimalAssessment(label="bear", danger=1.0), AnimalAssessment(label="boar", danger=0.8)
+# BEAR is at the very top of the danger scale (1.0): too dangerous to sit as a warning under any circumstances, so
+# it always alarms outright and never exercises the door/people/time gating below. WOLF is dangerous enough to be
+# considered (above dangerous_animal_threshold) but not at that extreme, so it does exercise the gating -- a
+# hypothetical danger score, not tied to any real demo's animal.
+BEAR = AnimalAssessment(label="bear", danger=1.0)
+WOLF = AnimalAssessment(label="wolf", danger=0.95)
+BOAR = AnimalAssessment(label="boar", danger=0.8)
 
 
 def open_door(session_factory):
@@ -319,15 +325,23 @@ def open_door(session_factory):
         s.commit()
 
 
-def test_dangerous_animal_is_a_warning_if_the_house_is_closed(world):
+def test_a_maximally_dangerous_animal_always_alarms_regardless_of_context(world):
+    """The point: a bear (danger 1.0) is never merely a warning, door closed or not -- a warning would ask for a
+    human decision that is already moot at the top of the danger scale."""
     sid = world.situation("garden")
     world.summary(sid, "garden", 1.0, animals=[BEAR])
+    assert [a.cause for a in world.alarms()] == ["dangerous animal"] and not world.warnings()
+
+
+def test_dangerous_animal_is_a_warning_if_the_house_is_closed(world):
+    sid = world.situation("garden")
+    world.summary(sid, "garden", 0.95, animals=[WOLF])
     assert [w.cause for w in world.warnings()] == ["dangerous animal"] and not world.alarms()
 
 
 def test_dangerous_animal_is_an_alarm_if_an_entry_point_is_open(world, session_factory):
     open_door(session_factory)
-    world.summary(world.situation("garden"), "garden", 1.0, animals=[BEAR])
+    world.summary(world.situation("garden"), "garden", 0.95, animals=[WOLF])
     assert [a.cause for a in world.alarms()] == ["dangerous animal"] and not world.warnings()
 
 
@@ -340,20 +354,20 @@ def test_animals_below_the_danger_threshold_are_ignored(world, session_factory):
 def test_optional_alarm_condition_people_present(make_world):
     world = make_world(ControllerConfig(animal_alarm_if_people_present=True))
     sid = world.situation("garden")
-    world.summary(sid, "garden", 1.0, animals=[BEAR])
+    world.summary(sid, "garden", 0.95, animals=[WOLF])
     assert world.warnings() and not world.alarms()  # nobody around
 
     world.kb.record_detection("anna", "house", 0.0, T0)
     world.resolve(sid)
     world.clock.advance(1)
-    world.summary(world.situation("garden"), "garden", 1.0, animals=[BEAR])
+    world.summary(world.situation("garden"), "garden", 0.95, animals=[WOLF])
     assert [a.cause for a in world.alarms()] == ["dangerous animal"]
 
 
 @pytest.mark.parametrize("window, expected", [((time(11), time(13)), "alarm"), ((time(20), time(22)), "warning")])
 def test_optional_alarm_condition_time_frame(make_world, window, expected):
     world = make_world(ControllerConfig(animal_alarm_window=window))  # it is 12:00
-    world.summary(world.situation("garden"), "garden", 1.0, animals=[BEAR])
+    world.summary(world.situation("garden"), "garden", 0.95, animals=[WOLF])
     assert (len(world.alarms()), len(world.warnings())) == ((1, 0) if expected == "alarm" else (0, 1))
 
 
@@ -395,7 +409,7 @@ def test_events_are_not_held_back_while_a_warning_waits_for_the_answer(world):
     assert len(world.warnings()) == 1 and len(world.transport.sent) == 1 and world.status(sid) == "active"
     assert len(world.rows(SituationSummary)) == 3 and len(world.rows(AggregatedSummary)) == 3
 
-    world.summary(sid, "entry", 1.0, [person(suspicion=0.5)], animals=[AnimalAssessment(label="bear", danger=1.0)])
+    world.summary(sid, "entry", 1.0, [person(suspicion=0.5)], animals=[WOLF])
     assert sorted(w.cause for w in world.warnings()) == ["dangerous animal", "suspicious person"]  # a new cause
 
 
